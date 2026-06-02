@@ -33,38 +33,32 @@ jobs:
         run: gh release upload "${GITHUB_REF_NAME}" dist/*.exe --clobber
 
   macos:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { runner: macos-14, arch: arm64 }   # Apple Silicon
-          - { runner: macos-13, arch: x64 }      # Intel
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-14   # Apple Silicon runner (fast); builds a universal2 binary
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install pyinstaller
-      - name: Build GUI (.app bundle)
-        run: pyinstaller --windowed --name claude-code-export-import-gui gui.py
-      - name: Build CLI
-        run: pyinstaller --onefile --console --name claude-code-export-import-cli-macos-${{ matrix.arch }} claude_session_port.py
+      - name: Build GUI (.app, universal2 = Intel + Apple Silicon)
+        run: pyinstaller --windowed --target-arch universal2 --name claude-code-export-import-gui gui.py
+      - name: Build CLI (universal2)
+        run: pyinstaller --onefile --console --target-arch universal2 --name claude-code-export-import-cli-macos-universal claude_session_port.py
       - name: Zip the .app
         run: |
           cd dist
-          zip -r -y "claude-code-export-import-gui-macos-${{ matrix.arch }}.zip" "claude-code-export-import-gui.app"
+          zip -r -y "claude-code-export-import-gui-macos-universal.zip" "claude-code-export-import-gui.app"
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-${{ matrix.arch }}
+          name: macos-universal
           path: |
-            dist/claude-code-export-import-gui-macos-${{ matrix.arch }}.zip
-            dist/claude-code-export-import-cli-macos-${{ matrix.arch }}
+            dist/claude-code-export-import-gui-macos-universal.zip
+            dist/claude-code-export-import-cli-macos-universal
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${GITHUB_REF_NAME}" \
-            "dist/claude-code-export-import-gui-macos-${{ matrix.arch }}.zip" \
-            "dist/claude-code-export-import-cli-macos-${{ matrix.arch }}" --clobber
+            "dist/claude-code-export-import-gui-macos-universal.zip" \
+            "dist/claude-code-export-import-cli-macos-universal" --clobber
