@@ -63,6 +63,11 @@ Download the GUI build from the
 Then quit and reopen Claude. That's the whole flow. Python users can launch the
 same GUI with `python gui.py`.
 
+**macOS:** download `claude-code-export-import-gui-macos-<arch>.zip` (arm64 for
+Apple Silicon, x64 for Intel), unzip, and open the app. Because it is **unsigned**,
+macOS Gatekeeper will block the first launch — **right-click the app → Open →
+Open**, or run `xattr -cr <app>` once. Or just run from source: `python3 gui.py`.
+
 ### CLI
 
 #### 1) Export on the source machine
