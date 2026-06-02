@@ -117,6 +117,47 @@ def find_record_dir(explicit=None):
             fallback = (base, None, None)
     return fallback
 
+def default_claude_home(explicit=None):
+    return os.path.abspath(os.path.expanduser(
+        explicit or os.path.join(os.path.expanduser('~'), '.claude')))
+
+def list_sessions(claude_home=None, app_store=None, include_archived=False):
+    """Enumerate local sessions for a friendly picker: join app records with their
+       jsonl transcript. Returns a list of dicts sorted by lastFocusedAt (desc):
+       {title, cwd, cli_id, jsonl, last, archived}."""
+    home = default_claude_home(claude_home)
+    out, seen = [], set()
+    for base in candidate_app_store_bases(app_store):
+        for f in glob.glob(os.path.join(base, '**', 'local_*.json'), recursive=True):
+            try:
+                o = json.load(open(f, encoding='utf-8'))
+            except Exception:
+                continue
+            cli = o.get('cliSessionId')
+            cwd = o.get('cwd')
+            if not cli or cli in seen:
+                continue
+            if o.get('isArchived') and not include_archived:
+                continue
+            jsonl = None
+            if cwd:
+                cand = os.path.join(home, 'projects', enc_project(cwd), cli + '.jsonl')
+                if os.path.isfile(cand):
+                    jsonl = cand
+            if not jsonl:  # fallback: find the jsonl by id under any project folder
+                hits = glob.glob(os.path.join(home, 'projects', '*', cli + '.jsonl'))
+                if hits:
+                    jsonl = hits[0]
+            if not jsonl:
+                continue
+            seen.add(cli)
+            out.append({'title': o.get('title') or '(untitled)', 'cwd': cwd,
+                        'cli_id': cli, 'jsonl': jsonl,
+                        'last': o.get('lastFocusedAt') or 0,
+                        'archived': bool(o.get('isArchived'))})
+    out.sort(key=lambda r: r['last'], reverse=True)
+    return out
+
 def write_app_index(base, template_path, cli_id, cwd, title, title_source, dry):
     """Create local_<uuid>.json (the record the app uses to list/title the session),
        by cloning an existing local record and overriding the key fields."""
@@ -382,10 +423,27 @@ def do_import(args):
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+def do_list(args):
+    rows = list_sessions(args.claude_home, args.app_store, include_archived=args.all)
+    if not rows:
+        print("No sessions found.")
+        return
+    print(f"{len(rows)} session(s):\n")
+    for i, r in enumerate(rows, 1):
+        print(f"{i:3}. {r['title']}")
+        print(f"     {r['cwd']}")
+        print(f"     {r['jsonl']}")
+
 def main():
     ap = argparse.ArgumentParser(
         description="Port Claude Code .jsonl sessions between installs, machines, accounts and builds.")
     sub = ap.add_subparsers(dest='cmd', required=True)
+
+    pl = sub.add_parser('list', help='list local sessions (title + transcript path)')
+    pl.add_argument('--claude-home', help='.claude root (default ~/.claude)')
+    pl.add_argument('--app-store', default=None, help='claude-code-sessions folder (default: auto)')
+    pl.add_argument('--all', action='store_true', help='include archived sessions')
+    pl.set_defaults(func=do_list)
 
     pe = sub.add_parser('export', help='bundle session + sidecar + meta(title/cwd) into a zip')
     pe.add_argument('--src', required=True, help='path to the source .jsonl')

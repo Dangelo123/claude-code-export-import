@@ -51,7 +51,21 @@ cd claude-code-export-import
 
 ## Usage
 
-### 1) Export on the source machine
+### Easiest: the GUI (no commands)
+
+Download the GUI build from the
+[latest release](https://github.com/fernandomachado-arch/claude-code-export-import/releases/latest)
+(`claude-code-export-import-gui-win-x64.exe`) and double-click it.
+
+- **Export tab** — pick a session from the list (by title) and save a `.zip`.
+- **Import tab** — choose a `.zip` you received and click **Import**.
+
+Then quit and reopen Claude. That's the whole flow. Python users can launch the
+same GUI with `python gui.py`.
+
+### CLI
+
+#### 1) Export on the source machine
 
 ```bash
 python claude_session_port.py export --src ~/.claude/projects/<folder>/<sessionId>.jsonl
@@ -63,7 +77,7 @@ cache, and a `meta.json` (title + cwd) so the title travels with it.
 > Tip: find a session by its sidebar title inside the `*.jsonl` / app records,
 > or just sort the `~/.claude/projects/**/*.jsonl` files by modified time.
 
-### 2) Import on the target machine
+#### 2) Import on the target machine
 
 ```bash
 python claude_session_port.py import --src ./claude-session-<id>.zip
