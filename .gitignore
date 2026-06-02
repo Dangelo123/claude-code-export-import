@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Build artifacts (PyInstaller)
+build/
+dist/
+*.spec
+
+# Bundles / local test data — never commit real sessions (they contain your chats)
+*.zip
+*.jsonl
+claude-session-*.zip
+
+# OS
+.DS_Store
+Thumbs.db
