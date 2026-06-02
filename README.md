@@ -35,7 +35,12 @@ Full write-up: **[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)**.
 
 ## Install
 
-Just Python 3.8+ (standard library only — no dependencies):
+**No Python? Grab the standalone Windows binary** from the
+[latest release](https://github.com/fernandomachado-arch/claude-code-export-import/releases/latest)
+(`claude-code-export-import-win-x64.exe`) and use it like the commands below,
+replacing `python claude_session_port.py` with the `.exe`.
+
+**From source** (any OS, Python 3.8+, standard library only — no dependencies):
 
 ```bash
 git clone https://github.com/fernandomachado-arch/claude-code-export-import
