@@ -59,6 +59,12 @@ Download the GUI build from the
 
 - **Export tab** — pick a session from the list (by title) and save a `.zip`.
 - **Import tab** — choose a `.zip` you received and click **Import**.
+- **Migrate everything tab** — move a *whole install* to another machine.
+  Step 1 bundles every session plus your memories on the old machine; step 2
+  restores them on the new one. It reads the path map from the bundle and shows
+  one row per project so you can say where each lives now — **Suggest
+  destinations** prefills them from your home folder, and **Preview** shows every
+  `old → new` decision without writing anything.
 
 Then quit and reopen Claude. That's the whole flow. Python users can launch the
 same GUI with `python gui.py`.

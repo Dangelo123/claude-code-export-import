@@ -13,13 +13,16 @@ Standard library only (Tkinter). Reuses the tested core in claude_session_port.p
 Run:  python gui.py     |     packaged:  double-click the app
 """
 import io
+import json
 import os
+import re
 import sys
 import contextlib
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
+import batch
 import claude_session_port as core
 
 
@@ -34,6 +37,11 @@ _IMPORT_DEFAULTS = dict(
     git_branch=None, title_suffix=None, title=None, app_store=None,
     no_app_index=False, bump_version=False, no_sidecar=False, with_history=False,
     dry_run=False,
+)
+_EXPORT_ALL_DEFAULTS = dict(out=None, claude_home=None, app_store=None, dry_run=False)
+_IMPORT_ALL_DEFAULTS = dict(
+    src=None, path_map=None, claude_home=None, app_store=None, keep_id=False,
+    no_app_index=False, with_history=False, retention_days=999999, dry_run=False,
 )
 
 
@@ -65,16 +73,20 @@ class App(ttk.Frame):
         self.pack(fill="both", expand=True)
         self.rows = []          # list_sessions() result, indexed by Treeview iid
         self.import_paths = []   # selected .zip paths
+        self.map_entries = []    # [(source_path, Entry)] of the path map editor
         self._busy = False
 
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True)
         self.tab_export = ttk.Frame(nb, padding=10)
         self.tab_import = ttk.Frame(nb, padding=10)
+        self.tab_migrate = ttk.Frame(nb, padding=10)
         nb.add(self.tab_export, text="  Export a session  ")
         nb.add(self.tab_import, text="  Import a session  ")
+        nb.add(self.tab_migrate, text="  Migrate everything  ")
         self._build_export(self.tab_export)
         self._build_import(self.tab_import)
+        self._build_migrate(self.tab_migrate)
 
         ttk.Label(self, text="Log:").pack(anchor="w", pady=(8, 0))
         self.log = scrolledtext.ScrolledText(self, height=8, wrap="word", state="disabled")
@@ -239,6 +251,194 @@ class App(ttk.Frame):
 
         self.btn_import = ttk.Button(t, text="Import", command=self._do_import)
         self.btn_import.pack(anchor="e", pady=(12, 0))
+
+    # ---------------------------------------------------------------- migrate
+    def _build_migrate(self, t):
+        ttk.Label(t, text="Move a whole install to another machine.",
+                  font=("", 10, "bold")).pack(anchor="w")
+        ttk.Label(t, text="Step 1 runs on the machine you are leaving; step 2 on the new one. "
+                          "Memories and CLAUDE.md travel too.",
+                  foreground="#555").pack(anchor="w", pady=(0, 10))
+
+        # ---- step 1: export everything
+        s1 = ttk.LabelFrame(t, text="1. On the old machine — bundle everything", padding=8)
+        s1.pack(fill="x", pady=(0, 8))
+        r = ttk.Frame(s1); r.pack(fill="x")
+        ttk.Label(r, text="Save to folder:", width=16).pack(side="left")
+        self.mig_out_var = tk.StringVar()
+        ttk.Entry(r, textvariable=self.mig_out_var).pack(side="left", fill="x", expand=True)
+        ttk.Button(r, text="Browse…", command=self._pick_mig_out).pack(side="left", padx=(6, 0))
+        self.btn_export_all = ttk.Button(s1, text="Export everything",
+                                         command=self._do_export_all)
+        self.btn_export_all.pack(anchor="e", pady=(8, 0))
+
+        # ---- step 2: import everything
+        s2 = ttk.LabelFrame(t, text="2. On the new machine — restore it", padding=8)
+        s2.pack(fill="both", expand=True)
+        r = ttk.Frame(s2); r.pack(fill="x")
+        ttk.Label(r, text="Bundle folder:", width=16).pack(side="left")
+        self.mig_src_var = tk.StringVar()
+        ttk.Entry(r, textvariable=self.mig_src_var).pack(side="left", fill="x", expand=True)
+        ttk.Button(r, text="Browse…", command=self._pick_mig_src).pack(side="left", padx=(6, 0))
+
+        ttk.Label(s2, text="Where each folder lives on THIS machine "
+                           "(leave blank to skip that project):",
+                  foreground="#555").pack(anchor="w", pady=(10, 2))
+
+        # a scrollable list of "old path -> [entry]" rows
+        wrap = ttk.Frame(s2); wrap.pack(fill="both", expand=True)
+        self.map_canvas = tk.Canvas(wrap, height=150, highlightthickness=0)
+        sb = ttk.Scrollbar(wrap, orient="vertical", command=self.map_canvas.yview)
+        self.map_frame = ttk.Frame(self.map_canvas)
+        self.map_frame.bind("<Configure>", lambda e: self.map_canvas.configure(
+            scrollregion=self.map_canvas.bbox("all")))
+        self.map_canvas.create_window((0, 0), window=self.map_frame, anchor="nw")
+        self.map_canvas.configure(yscrollcommand=sb.set)
+        self.map_canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.map_hint = ttk.Label(self.map_frame,
+                                  text="Pick the bundle folder above to load the paths.",
+                                  foreground="#777")
+        self.map_hint.pack(anchor="w")
+
+        bar = ttk.Frame(s2); bar.pack(fill="x", pady=(8, 0))
+        ttk.Button(bar, text="Suggest destinations", command=self._suggest_dests
+                   ).pack(side="left")
+        self.btn_preview = ttk.Button(bar, text="Preview (no changes)",
+                                      command=lambda: self._do_import_all(True))
+        self.btn_preview.pack(side="right", padx=(6, 0))
+        self.btn_import_all = ttk.Button(bar, text="Restore everything",
+                                         command=lambda: self._do_import_all(False))
+        self.btn_import_all.pack(side="right")
+
+    def _pick_mig_out(self):
+        d = filedialog.askdirectory(title="Folder to save the migration bundle")
+        if d:
+            self.mig_out_var.set(d)
+
+    def _pick_mig_src(self):
+        d = filedialog.askdirectory(title="Folder containing the migration bundle")
+        if not d:
+            return
+        self.mig_src_var.set(d)
+        self._load_path_map(d)
+
+    def _load_path_map(self, folder):
+        """Read the template written by export-all and build one row per path."""
+        for w in self.map_frame.winfo_children():
+            w.destroy()
+        self.map_entries = []
+
+        tmpl = os.path.join(folder, 'path-map.template.json')
+        if not os.path.isfile(tmpl):
+            ttk.Label(self.map_frame,
+                      text="No path-map.template.json here — is this a folder made by "
+                           "\"Export everything\"?",
+                      foreground="#a00").pack(anchor="w")
+            return
+        try:
+            with open(tmpl, encoding='utf-8') as fh:
+                paths = sorted(json.load(fh).keys())
+        except Exception as e:
+            ttk.Label(self.map_frame, text="Could not read the template: %s" % e,
+                      foreground="#a00").pack(anchor="w")
+            return
+
+        for p in paths:
+            row = ttk.Frame(self.map_frame)
+            row.pack(fill="x", pady=1)
+            ttk.Label(row, text=p, width=46, anchor="w").pack(side="left")
+            ttk.Label(row, text="→").pack(side="left", padx=4)
+            e = ttk.Entry(row)
+            e.pack(side="left", fill="x", expand=True)
+            self.map_entries.append((p, e))
+        self._append_log("Loaded %d source paths from the bundle.\n" % len(paths))
+
+    def _suggest_dests(self):
+        """
+        Prefill destinations by translating each source path to this machine's
+        home. A guess, not a decision -- every field stays editable, and the
+        preview shows exactly what would happen.
+        """
+        if not self.map_entries:
+            messagebox.showinfo("Nothing to suggest",
+                                "Pick the bundle folder first.")
+            return
+        home = os.path.expanduser("~")
+        for src, entry in self.map_entries:
+            if entry.get().strip():
+                continue
+            leaf = re.split(r"[\\/]", src.rstrip("\\/"))[-1] or "project"
+            dest = os.path.join(home, leaf)
+            if os.name != "nt":
+                dest = dest.replace("\\", "/")
+            entry.delete(0, "end")
+            entry.insert(0, dest)
+
+    def _collect_map(self):
+        m = {}
+        for src, entry in self.map_entries:
+            v = entry.get().strip()
+            if v:
+                m[src] = v
+        return m
+
+    def _do_export_all(self):
+        out = self.mig_out_var.get().strip()
+        if not out:
+            messagebox.showwarning("Pick a folder", "Choose where to save the bundle.")
+            return
+
+        def work():
+            return _run(batch.do_export_all, _EXPORT_ALL_DEFAULTS,
+                        out=out, claude_home=self._home_or_none(),
+                        app_store=self._store_or_none())
+
+        self._busy_run(work, "Exported",
+                       "Everything bundled.\n\nCopy this folder to the new machine, "
+                       "then use step 2 there.")
+
+    def _do_import_all(self, preview):
+        src = self.mig_src_var.get().strip()
+        if not src:
+            messagebox.showwarning("Pick a folder", "Choose the bundle folder.")
+            return
+        mapping = self._collect_map()
+        if not mapping:
+            messagebox.showwarning(
+                "No destinations",
+                "Fill in at least one destination.\n\n"
+                "Tip: \"Suggest destinations\" fills them from your home folder.")
+            return
+        if not preview and not messagebox.askyesno(
+                "Restore everything?",
+                "This adds %d project path(s) to this machine's Claude.\n\n"
+                "Existing sessions are never deleted or modified.\n\n"
+                "Close the Claude app first — it rewrites its index when it quits."
+                % len(mapping)):
+            return
+
+        # the core reads the map from a file; write the edited one next to the bundle
+        map_path = os.path.join(src, 'path-map.json')
+        try:
+            with open(map_path, 'w', encoding='utf-8') as fh:
+                json.dump(mapping, fh, ensure_ascii=False, indent=2)
+        except Exception as e:
+            messagebox.showerror("Could not save the map", str(e))
+            return
+
+        def work():
+            return _run(batch.do_import_all, _IMPORT_ALL_DEFAULTS,
+                        src=src, path_map=map_path,
+                        claude_home=self._home_or_none(),
+                        app_store=self._store_or_none(),
+                        dry_run=preview)
+
+        self._busy_run(work,
+                       "Preview" if preview else "Restored",
+                       "Nothing was written — this is what would happen."
+                       if preview else
+                       "Done.\n\nQuit and reopen Claude to see the sessions.")
 
     def _pick_zips(self):
         ps = filedialog.askopenfilenames(title="Choose session .zip file(s)",
