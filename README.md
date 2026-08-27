@@ -98,6 +98,92 @@ Use `--dry-run` on either command to preview without writing.
 
 ---
 
+## Migrating a whole install (`batch.py`)
+
+The commands above move **one** session. Moving an entire install is a different
+problem: many source roots map to many destination roots, and if the two
+machines run different operating systems the *path separators* change too.
+
+```bash
+# on the source machine — bundles every session + your memories + CLAUDE.md
+python batch.py export-all --out ./migration
+
+# fill in the destinations, then on the target machine:
+python batch.py import-all --src ./migration --path-map ./my-path-map.json
+```
+
+`export-all` writes a `path-map.template.json` next to the bundles, pre-filled
+with every source path it found. You supply the destinations:
+
+```json
+{
+  "D:\\Work\\Project": "/home/you/work/project",
+  "C:\\Users\\You\\Documents\\Notes": "/home/you/notes"
+}
+```
+
+Matching is **longest-prefix**, so worktrees and sub-projects resolve from their
+parent root — you only map the roots. Use `--dry-run` to see every
+`old → new` decision before anything is written.
+
+### Windows → Linux
+
+Swapping the prefix is not enough. `D:\proj\src\Foo.cs` would become
+`/home/you/proj\src\Foo.cs` — a hybrid that is broken on both systems. And you
+cannot simply replace every backslash in the file, because that would mangle
+regexes, escape sequences and code quoted inside the conversation.
+
+The rewriter matches *prefix + path tail* and flips separators only within that
+match. It runs in two flavours, because the same path is spelled differently
+depending on where it lives:
+
+| File | How the path is stored | Rewriter |
+|------|------------------------|----------|
+| `*.jsonl`, `*.json` | JSON-escaped — `D:\\proj` | `build_rewriter` |
+| `*.md`, `*.txt` | literal — `D:\proj` | `build_plain_rewriter` |
+
+Paths **outside** your map are left alone. That is deliberate: the tool will not
+invent a destination it was not given. If your notes reference tool paths like
+`C:\Users\You\.azure`, add them to the map — think "every Windows path that must
+become a Linux path", not just "where the projects live".
+
+### More than transcripts
+
+`export-all` also carries what lives *beside* the sessions and is never
+referenced by a `.jsonl`:
+
+- per-project `memory/` and `plans/` folders
+- the home-level `CLAUDE.md`
+
+They ride in `_extras.zip` and are rewritten with the plain-text rewriter. An
+existing file on the target is **never** overwritten.
+
+### Retention: read this before importing
+
+Claude Code prunes transcripts older than `cleanupPeriodDays` (default: **30**)
+at startup. Restoring an archive without raising it first means the app deletes
+most of your history the moment you open it.
+
+`import-all` writes the setting **before** any transcript lands, and never
+lowers a value that is already higher. On the corpus this was built against,
+that guard protected 2442 of 3154 transcripts.
+
+### Tests
+
+```bash
+python test_batch.py         # path rewriters, both grammars
+python test_extras.py        # memories/CLAUDE.md transport
+python test_no_clobber.py    # importing never touches existing sessions
+python test_real_corpus.py   # dry-run over YOUR real transcripts (read-only)
+```
+
+`test_real_corpus.py` is the one worth running before you trust a migration: it
+replays the rewriter over every local transcript and asserts that every line
+that parsed as JSON before still parses after, and that no mapped Windows path
+survived.
+
+---
+
 ## What survives the trip
 
 - ✅ Same account, same machine
@@ -107,12 +193,17 @@ Use `--dry-run` on either command to preview without writing.
 - ✅ Large sessions (tested with a 67 MB / 1154-turn transcript)
 - ✅ The session **title** (carried in the bundle, set as `titleSource=user` so the app won't regenerate it)
 - ✅ The model/effort are **inherited from the target account's own template**, so it never asks for a model the target can't use
+- ✅ **A different operating system** — Windows → Linux, with paths and separators rewritten (`batch.py`)
+- ✅ **Your memories and `CLAUDE.md`** (`batch.py export-all`)
 
 ## What does *not* travel
 
 - ❌ The **pin** state (lives in the app's Local Storage / leveldb) — re-pin with one click
 - ❌ The cloud-side mirror (`bridgeSessionIds` are zeroed → the imported session is local-only)
-- ❌ The project files, MCP servers, auth, settings — a transcript is not an environment
+- ❌ **Auth** — the token is machine-bound; sign in on the target
+- ❌ MCP OAuth tokens, and paths inside `.claude.json` that point at Windows binaries
+- ❌ Paths you did not put in the `--path-map` — by design, the tool invents nothing
+- ❌ The project files themselves — a transcript is not an environment
 
 ---
 
