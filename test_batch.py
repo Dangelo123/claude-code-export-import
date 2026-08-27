@@ -146,8 +146,8 @@ checkp("segunda raiz",
        "- [PG](/home/fernando/pg/README.md) — hook")
 
 checkp("texto sem caminho nenhum",
-       "nada de path aqui, so prosa com \n e regex \d+",
-       "nada de path aqui, so prosa com \n e regex \d+")
+       r"nada de path aqui, so prosa com \n e regex \d+",
+       r"nada de path aqui, so prosa com \n e regex \d+")
 
 print()
 if fails:
