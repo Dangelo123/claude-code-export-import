@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] — 2026-08-28
+## [1.1.0] — 2026-08-28
 
 Moves the tool from transporting **one session** to migrating a **whole install**,
 including across operating systems.
@@ -51,7 +51,7 @@ processed, zero JSON corrupted, zero Windows paths left behind, titles preserved
 in the sidebar, and pre-existing sessions on the target untouched (identical
 SHA-256).
 
-## [0.1.0]
+## [1.0.0] — 2026-06-02
 
 Initial release: port a single Claude Code session across machines, accounts and
 app builds, writing both the transcript and the desktop app's index record.
