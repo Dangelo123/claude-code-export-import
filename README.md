@@ -1,6 +1,14 @@
 # claude-code-export-import
 
+[![tests](https://github.com/Dangelo123/claude-code-export-import/actions/workflows/tests.yml/badge.svg)](https://github.com/Dangelo123/claude-code-export-import/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/Dangelo123/claude-code-export-import?sort=semver)](https://github.com/Dangelo123/claude-code-export-import/releases/latest)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
+[![no dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](#)
+
 > Move a Claude Code session from one machine/account to another — and have it show up in the sidebar like it was always there.
+>
+> Or move **the whole install**, across operating systems, with your memories.
 
 Claude Code has no built-in way to export or import a conversation between
 installs ([feature request #18645](https://github.com/anthropics/claude-code/issues/18645),
@@ -36,14 +44,14 @@ Full write-up: **[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)**.
 ## Install
 
 **No Python? Grab the standalone Windows binary** from the
-[latest release](https://github.com/fernandomachado-arch/claude-code-export-import/releases/latest)
+[latest release](https://github.com/Dangelo123/claude-code-export-import/releases/latest)
 (`claude-code-export-import-win-x64.exe`) and use it like the commands below,
 replacing `python claude_session_port.py` with the `.exe`.
 
 **From source** (any OS, Python 3.8+, standard library only — no dependencies):
 
 ```bash
-git clone https://github.com/fernandomachado-arch/claude-code-export-import
+git clone https://github.com/Dangelo123/claude-code-export-import
 cd claude-code-export-import
 ```
 
@@ -54,7 +62,7 @@ cd claude-code-export-import
 ### Easiest: the GUI (no commands)
 
 Download the GUI build from the
-[latest release](https://github.com/fernandomachado-arch/claude-code-export-import/releases/latest)
+[latest release](https://github.com/Dangelo123/claude-code-export-import/releases/latest)
 (`claude-code-export-import-gui-win-x64.exe`) and double-click it.
 
 - **Export tab** — pick a session from the list (by title) and save a `.zip`.
