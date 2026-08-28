@@ -1,0 +1,59 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # The path rewriting differs per OS (separators, drive letters), so the
+    # suite has to run on all three -- a bug that only shows up on Linux is
+    # exactly the class of bug this tool exists to avoid.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.8', '3.12']
+        exclude:
+          # 3.8 is not available on the arm64 macOS runners
+          - os: macos-latest
+            python: '3.8'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Standard library only (no install step)
+        run: python -c "import sys; print(sys.version)"
+
+      - name: Path rewriters (both grammars)
+        run: python test_batch.py
+
+      - name: Extras transport (memory/ + CLAUDE.md)
+        run: python test_extras.py
+
+      - name: Import never clobbers existing sessions
+        run: python test_no_clobber.py
+
+      - name: GUI migrate tab (skips itself when headless)
+        run: python test_gui_migrate.py
+
+      - name: Byte-compile every module
+        run: python -m compileall -q claude_session_port.py batch.py gui.py
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install flake8
+      - name: flake8 (errors only)
+        run: flake8 --select=E9,F63,F7,F82 --show-source .
