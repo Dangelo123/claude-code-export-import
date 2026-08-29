@@ -119,12 +119,18 @@ problem: many source roots map to many destination roots, and if the two
 machines run different operating systems the *path separators* change too.
 
 ```bash
-# on the source machine — bundles every session + your memories + CLAUDE.md
-python batch.py export-all --out ./migration
+# on the source machine — every session, your memories, CLAUDE.md and the
+# app profile (records + sidebar state). Add --with-config for MCP servers
+# and per-project permissions; it warns which files carry credentials.
+python batch.py export-all --out ./migration --with-config
 
-# fill in the destinations, then on the target machine:
-python batch.py import-all --src ./migration --path-map ./my-path-map.json
+# fill in the destinations, then on the target machine, with the app CLOSED:
+python batch.py import-all --src ./migration --path-map ./my-path-map.json --faithful
 ```
+
+`--faithful` is what makes the destination's sidebar match the source's,
+pinned sessions and all. Without it the importer mints new session ids, and
+every pin points at nothing.
 
 `export-all` writes a `path-map.template.json` next to the bundles, pre-filled
 with every source path it found. You supply the destinations:
@@ -189,7 +195,15 @@ python test_batch.py         # path rewriters, both grammars
 python test_extras.py        # memories/CLAUDE.md transport
 python test_no_clobber.py    # importing never touches existing sessions
 python test_real_corpus.py   # dry-run over YOUR real transcripts (read-only)
+
+python -m unittest test_modo_fiel test_localstorage_paths \
+                   test_titulo_visibilidade test_fresh_install
 ```
+
+The `unittest` modules cover what a real cross-OS migration broke: a fresh
+install with no record to clone, titles falling back to the folder name,
+sessions the source never listed showing up at the destination, the paths
+buried in Local Storage, and the profile transport that carries pinning.
 
 `test_real_corpus.py` is the one worth running before you trust a migration: it
 replays the rewriter over every local transcript and asserts that every line
@@ -209,12 +223,38 @@ survived.
 - ✅ The model/effort are **inherited from the target account's own template**, so it never asks for a model the target can't use
 - ✅ **A different operating system** — Windows → Linux, with paths and separators rewritten (`batch.py`)
 - ✅ **Your memories and `CLAUDE.md`** (`batch.py export-all`)
+- ✅ **Pinned sessions**, in the same order (`import-all --faithful`) — see below
+- ✅ **MCP servers and per-project permissions** (`export-all --with-config`)
+
+### The sidebar lives in three places
+
+Making the destination *look* like the source took longer than moving the
+conversations, because that state is split:
+
+| Where | What it holds |
+|---|---|
+| `claude-code-sessions/…/local_*.json` | one record per session: title, cwd, archived, `isStarred` |
+| `Local Storage/leveldb` | order, width, grouping, `pinnedOrder`, and a `cc-session-cwd-*` **path** per session |
+| `IndexedDB/https_claude.ai_*.leveldb` | the session index the UI actually reads |
+
+Restoring only the first two is not enough, and it fails quietly: on a real
+migration 32 sessions had `isStarred: true` on disk and `pinnedOrder` listed
+every id, while the sidebar showed no pinned section at all. `--faithful`
+copies all three and keeps the session ids, which is what makes the references
+line up.
+
+Local Storage holds filesystem paths, so those get rewritten (this needs
+`plyvel`; without it the copy still happens and the tool prints the one command
+left to run). IndexedDB is copied byte for byte — its values use Blink's
+structured-clone format, where strings carry their length, so swapping a path
+for a longer one would corrupt the record. The paths a session actually opens
+with come from `local_*.json`, which *is* rewritten.
 
 ## What does *not* travel
 
-- ❌ The **pin** state (lives in the app's Local Storage / leveldb) — re-pin with one click
 - ❌ The cloud-side mirror (`bridgeSessionIds` are zeroed → the imported session is local-only)
 - ❌ **Auth** — the token is machine-bound; sign in on the target
+- ❌ A session token or device registration (`buddy-tokens.json`, `ant-device-registry.json`) — those belong to the machine
 - ❌ MCP OAuth tokens, and paths inside `.claude.json` that point at Windows binaries
 - ❌ Paths you did not put in the `--path-map` — by design, the tool invents nothing
 - ❌ The project files themselves — a transcript is not an environment
@@ -230,9 +270,10 @@ survived.
 | macOS | `~/Library/Application Support/Claude/claude-code-sessions` |
 | Linux | `~/.config/Claude/claude-code-sessions` |
 
-> Piece 2 requires the target app to have created at least one Code session
-> already (so the account folder exists to clone a template from). Sign in and
-> open one session once, then import.
+> Piece 2 needs the target to be **signed in** — that alone creates the account
+> folder, and the app only reads records under the signed-in account's UUID, so
+> it is the one thing the tool will not invent. Running a session there first is
+> not required: with no record to clone, the importer builds one from scratch.
 
 ---
 
@@ -244,6 +285,8 @@ survived.
 | `--keep-id` | keep the original sessionId (default: mint a new one) |
 | `--title "..."` | force the sidebar title |
 | `--no-app-index` | write only the transcript (piece 1), skip the app record |
+| `--faithful` | *(`import-all`)* reproduce the source sidebar: keep ids, restore the original records and both browser stores, pinned sessions included. Close the app on the target first |
+| `--index-all` | *(`import-all`)* also list sessions the source itself never showed — by default the destination mirrors the source's visibility |
 | `--no-sidecar` | don't copy the sidecar cache |
 | `--keep-paths` | don't rewrite the old cwd inside the content |
 | `--claude-home DIR` / `--app-store DIR` | override the auto-detected locations |
