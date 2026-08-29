@@ -165,6 +165,7 @@ def do_export_all(args):
         json.dump(tmpl, fh, ensure_ascii=False, indent=2)
 
     export_extras(home, out_dir)
+    export_app_profile(out_dir, args.app_store)
 
     print("\n[ok] %d bundles -> %s" % (len(manifest), out_dir))
     print("[ok] fill in %s and pass it to import-all --path-map" % tmpl_path)
@@ -200,6 +201,17 @@ def do_import_all(args):
         return None
 
     home = csp.default_claude_home(args.claude_home)
+
+    # Modo fiel: em vez de sintetizar registros novos, restaura os originais e
+    # mantem os ids das sessoes. E o que faz o pinned sobreviver, porque
+    # pinnedOrder guarda o id local_<uuid> de cada registro, nao o da sessao.
+    fiel = args.faithful and os.path.isfile(os.path.join(src_dir, PROFILE_ZIP))
+    if args.faithful and not fiel:
+        print("[warn] --faithful pedido, mas o bundle nao tem " + PROFILE_ZIP
+              + " (exportado por uma versao antiga); seguindo no modo comum)")
+    if fiel:
+        print("[info] modo fiel: ids preservados; registros e barra lateral"
+              " vem da origem")
     if not args.dry_run:
         ensure_retention(home, args.retention_days)
 
@@ -225,10 +237,10 @@ def do_import_all(args):
         # rewrite ourselves (keep_paths=True disables the naive one)
         ns = argparse.Namespace(
             src=bundle, target_cwd=target, claude_home=args.claude_home,
-            keep_id=args.keep_id,
+            keep_id=args.keep_id or fiel,
             keep_paths=True,
             git_branch=None, title_suffix=None, title=None,
-            app_store=args.app_store, no_app_index=args.no_app_index, index_all=args.index_all,
+            app_store=args.app_store, no_app_index=args.no_app_index or fiel, index_all=args.index_all,
             bump_version=False, no_sidecar=False, with_history=args.with_history,
             dry_run=False)
         # snapshot the destination so the deep rewrite only ever touches the
@@ -262,7 +274,13 @@ def do_import_all(args):
             return None
 
         import_extras(home, src_dir, rewrite, remap_slug,
+
                       plain_rewrite=build_plain_rewriter(mapping, to_posix))
+
+        if fiel:
+            import_app_profile(src_dir, remap, args.app_store, args.dry_run)
+            print("     >>> feche e reabra o app: o Local Storage so e relido"
+                  " na inicializacao")
 
     print("\n[done] imported %d, failed/skipped %d" % (ok, fail))
 
@@ -302,6 +320,139 @@ def export_extras(home, out_dir):
                 n += 1
     print("[ok] extras: %d arquivos -> %s" % (n, path))
     return n
+
+
+PROFILE_ZIP = '_app-profile.zip'
+
+
+def export_app_profile(out_dir, app_store=None):
+    """
+    Leva o perfil do app: os registros local_*.json em si e o Local Storage.
+
+    Recriar os registros do zero perde o que so existe neles -- e o Local
+    Storage guarda pinnedOrder, que aponta para o id 'local_<uuid>' de cada
+    registro. Se o destino gera ids novos, todo o pinned se perde. Copiando os
+    registros originais e importando com --keep-id, os ids continuam validos e
+    a barra lateral chega igual: fixadas, agrupamento e ordem.
+    """
+    import zipfile
+    base, _, _ = csp.find_record_dir(app_store)
+    if not base:
+        bases = csp.candidate_app_store_bases(app_store)
+        base = bases[0] if bases else None
+    if not base or not os.path.isdir(base):
+        print("[warn] app profile: nenhuma pasta claude-code-sessions encontrada")
+        return 0
+
+    ls = csp.local_storage_dir(app_store)
+    path = os.path.join(out_dir, PROFILE_ZIP)
+    n_rec = n_ls = 0
+    info = {"platform": sys.platform, "accounts": []}
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
+        for root, _, files in os.walk(base):
+            for fn in files:
+                if not (fn.startswith('local_') and fn.endswith('.json')):
+                    continue
+                full = os.path.join(root, fn)
+                rel = os.path.relpath(full, base).replace(chr(92), '/')
+                z.write(full, arcname='records/' + rel)
+                n_rec += 1
+                conta = rel.split('/')[0]
+                if conta not in info["accounts"]:
+                    info["accounts"].append(conta)
+        if ls:
+            for fn in sorted(os.listdir(ls)):
+                full = os.path.join(ls, fn)
+                if not os.path.isfile(full):
+                    continue
+                try:
+                    z.write(full, arcname='local-storage/' + fn)
+                    n_ls += 1
+                except (PermissionError, OSError):
+                    # o LOCK do leveldb nao e legivel com o app aberto e nao
+                    # faz falta: e um arquivo vazio recriado no destino
+                    pass
+        info["records"] = n_rec
+        info["localStorage"] = n_ls
+        z.writestr('profile.json', json.dumps(info, ensure_ascii=False, indent=2))
+    print("[ok] perfil do app: %d registros + %d arquivos de Local Storage -> %s"
+          % (n_rec, n_ls, path))
+    return n_rec
+
+
+def import_app_profile(src_dir, remap, app_store=None, dry=False):
+    """
+    Restaura os registros com o cwd reescrito e o Local Storage como esta.
+
+    Os ids nao mudam -- e isso que faz o pinned continuar valendo. O Local
+    Storage vai byte a byte porque e um LevelDB: reescrever seria arriscado, e
+    nada la dentro guarda caminho de arquivo (so ids e preferencias de UI).
+    """
+    import zipfile
+    src = os.path.join(src_dir, PROFILE_ZIP)
+    if not os.path.isfile(src):
+        return 0, 0
+
+    bases = csp.candidate_app_store_bases(app_store)
+    base = next((b for b in bases if os.path.isdir(b)), None)
+    if not base:
+        print("[warn] perfil do app: destino sem claude-code-sessions; "
+              "abra o app e faca login antes")
+        return 0, 0
+    ls_dest = os.path.join(csp.app_profile_dir(app_store), 'Local Storage', 'leveldb')
+
+    # O Local Storage do destino e substituido inteiro. Se o app guardar ali
+    # algo cifrado pelo cofre do sistema (DPAPI no Windows, keyring no Linux),
+    # o valor vindo de outra maquina nao decifra e o login cai. Guardar uma
+    # copia deixa isso reversivel.
+    if not dry and os.path.isdir(ls_dest):
+        bak = ls_dest + ".antes-do-import"
+        if not os.path.isdir(bak):
+            import shutil
+            shutil.copytree(ls_dest, bak, ignore_dangling_symlinks=True)
+            print("[ok] copia do Local Storage do destino em %s" % bak)
+
+        # Esvazia antes de escrever: misturar arquivos dos dois lados deixa .ldb
+        # orfaos e um CURRENT apontando para o MANIFEST do outro conjunto. O
+        # destino tem de ficar com exatamente os arquivos da origem.
+        if not dry and os.path.isdir(ls_dest):
+            for fn in os.listdir(ls_dest):
+                alvo = os.path.join(ls_dest, fn)
+                if os.path.isfile(alvo):
+                    try:
+                        os.remove(alvo)
+                    except OSError:
+                        pass
+
+    n_rec = n_ls = 0
+    with zipfile.ZipFile(src) as z:
+        for nome in z.namelist():
+            if nome.startswith('records/') and nome.endswith('.json'):
+                try:
+                    o = json.loads(z.read(nome).decode('utf-8'))
+                except Exception:
+                    continue
+                for campo in ('cwd', 'originCwd', 'worktreePath', 'planPath'):
+                    v = o.get(campo)
+                    if isinstance(v, str) and v:
+                        novo_v = remap(v)
+                        if novo_v:
+                            o[campo] = novo_v
+                dest = os.path.join(base, *nome[len('records/'):].split('/'))
+                if not dry:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(dest, 'w', encoding='utf-8', newline=chr(10)) as fh:
+                        json.dump(o, fh, ensure_ascii=False, indent=2)
+                n_rec += 1
+            elif nome.startswith('local-storage/') and not nome.endswith('/'):
+                if not dry:
+                    os.makedirs(ls_dest, exist_ok=True)
+                    with open(os.path.join(ls_dest, os.path.basename(nome)), 'wb') as fh:
+                        fh.write(z.read(nome))
+                n_ls += 1
+    print("[ok] perfil do app: %d registros restaurados, %d arquivos de Local Storage"
+          % (n_rec, n_ls))
+    return n_rec, n_ls
 
 
 def import_extras(home, src_dir, rewrite, remap_slug, plain_rewrite=None):
@@ -426,6 +577,10 @@ def main():
     pi.add_argument('--app-store', default=None)
     pi.add_argument('--keep-id', action='store_true')
     pi.add_argument('--no-app-index', action='store_true')
+    pi.add_argument('--faithful', action='store_true',
+                    help='reproduz a barra lateral da origem: mantem os ids,'
+                         ' restaura os registros originais e o estado de'
+                         ' sessoes fixadas (exige o app fechado no destino)')
     pi.add_argument('--index-all', action='store_true',
                     help='cria registro tambem para sessoes que nao'
                          ' apareciam na interface da origem')

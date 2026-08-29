@@ -5,6 +5,35 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-08-28
+
+Makes the destination's sidebar a reproduction of the source's, pinned
+sessions included.
+
+### Added
+
+- **`--faithful`.** Until now the importer rebuilt the app's session records
+  from scratch, which necessarily produced new ids. Pinning does not survive
+  that: `pinnedOrder`, in the app's Local Storage, refers to each record's own
+  `local_<uuid>` id, so every regenerated id points at nothing. Faithful mode
+  copies the original records instead and keeps session ids (`--keep-id`), so
+  those references stay valid.
+- **App profile transport (`_app-profile.zip`).** `export-all` now also bundles
+  the `local_*.json` records verbatim and the Local Storage LevelDB. The
+  records' `cwd`/`originCwd` are rewritten on import; the LevelDB is copied
+  byte for byte, since nothing in it holds a filesystem path -- only ids and
+  UI preferences (pinned order, grouping, sidebar width).
+- The destination's existing Local Storage is copied to
+  `leveldb.antes-do-import` before being replaced, and the directory is emptied
+  first so the result is exactly the source's file set (a mix leaves orphaned
+  `.ldb` files and a `CURRENT` pointing at the other set's `MANIFEST`).
+
+### Requires
+
+The app must be **closed on the destination**: Local Storage is a LevelDB read
+only at startup. Closing it on the source too is advisable, so the copied
+LevelDB is a consistent snapshot.
+
 ## [1.2.0] — 2026-08-28
 
 Fixes what a real Windows → CachyOS migration exposed: every session landed on

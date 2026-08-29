@@ -151,6 +151,27 @@ def find_account_dir(explicit=None):
     return None, None
 
 
+def app_profile_dir(explicit=None):
+    """Pasta do perfil do Claude Desktop (a mae de claude-code-sessions).
+
+    E onde vive o Local Storage, que guarda o estado da barra lateral --
+    inclusive quais sessoes estao fixadas."""
+    for base in candidate_app_store_bases(explicit):
+        if os.path.isdir(base):
+            return os.path.dirname(base)
+    bases = candidate_app_store_bases(explicit)
+    return os.path.dirname(bases[0]) if bases else None
+
+
+def local_storage_dir(explicit=None):
+    """<perfil>/Local Storage/leveldb, ou None se ainda nao existir."""
+    prof = app_profile_dir(explicit)
+    if not prof:
+        return None
+    d = os.path.join(prof, "Local Storage", "leveldb")
+    return d if os.path.isdir(d) else None
+
+
 def default_claude_home(explicit=None):
     return os.path.abspath(os.path.expanduser(
         explicit or os.path.join(os.path.expanduser('~'), '.claude')))
