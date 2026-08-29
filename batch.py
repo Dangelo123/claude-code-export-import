@@ -278,7 +278,8 @@ def do_import_all(args):
                       plain_rewrite=build_plain_rewriter(mapping, to_posix))
 
         if fiel:
-            import_app_profile(src_dir, remap, args.app_store, args.dry_run)
+            import_app_profile(src_dir, remap, args.app_store, args.dry_run,
+                               mapa_bruto=mapping, para_posix=to_posix)
             print("     >>> feche e reabra o app: o Local Storage so e relido"
                   " na inicializacao")
 
@@ -380,7 +381,36 @@ def export_app_profile(out_dir, app_store=None):
     return n_rec
 
 
-def import_app_profile(src_dir, remap, app_store=None, dry=False):
+def _reescrever_local_storage(ls_dir, mapa, para_posix):
+    """
+    Corrige os caminhos dentro do LevelDB copiado.
+
+    Precisa ler o banco de verdade -- os valores ficam em blocos comprimidos
+    com snappy, entao mexer nos bytes nao serve --, e para isso depende de
+    plyvel. Sem ele o Local Storage ainda vale a pena: o pinned atravessa. So
+    os caminhos e que ficam como estavam, e o aviso diz como resolver.
+    """
+    try:
+        import localstorage_paths as lsp
+    except Exception:
+        return
+    if not lsp.disponivel():
+        print("[warn] plyvel ausente: o Local Storage foi copiado (o pinned")
+        print("       atravessa), mas os caminhos guardados nele continuam")
+        print("       apontando para a maquina de origem. Para corrigir:")
+        print("         pacman -S python-plyvel   (ou apt install python3-plyvel)")
+        print("         python3 localstorage_paths.py --leveldb '%s' --path-map ..."
+              % ls_dir)
+        return
+    try:
+        n, k, _ = lsp.reescrever(ls_dir, mapa, para_posix)
+        print("[ok] Local Storage: %d chaves, %d com caminho reescrito" % (n, k))
+    except Exception as e:
+        print("[warn] nao consegui reescrever os caminhos do Local Storage: %s" % e)
+
+
+def import_app_profile(src_dir, remap, app_store=None, dry=False,
+                       mapa_bruto=None, para_posix=True):
     """
     Restaura os registros com o cwd reescrito e o Local Storage como esta.
 
@@ -425,12 +455,26 @@ def import_app_profile(src_dir, remap, app_store=None, dry=False):
                         pass
 
     n_rec = n_ls = 0
+    ilegiveis = []
     with zipfile.ZipFile(src) as z:
         for nome in z.namelist():
             if nome.startswith('records/') and nome.endswith('.json'):
+                bruto = z.read(nome)
                 try:
-                    o = json.loads(z.read(nome).decode('utf-8'))
+                    o = json.loads(bruto.decode('utf-8'))
                 except Exception:
+                    # Registro ilegivel ja na origem: um desligamento sujo
+                    # deixa o arquivo com o tamanho certo e so zeros dentro.
+                    # Copiar como esta mantem o espelho fiel (nao ha caminho a
+                    # reescrever) -- mas vale avisar, porque pode ser uma
+                    # sessao fixada que tambem nao abre na maquina de origem.
+                    ilegiveis.append(os.path.basename(nome))
+                    if not dry:
+                        dest = os.path.join(base, *nome[len('records/'):].split('/'))
+                        os.makedirs(os.path.dirname(dest), exist_ok=True)
+                        with open(dest, 'wb') as fh:
+                            fh.write(bruto)
+                    n_rec += 1
                     continue
                 for campo in ('cwd', 'originCwd', 'worktreePath', 'planPath'):
                     v = o.get(campo)
@@ -450,8 +494,19 @@ def import_app_profile(src_dir, remap, app_store=None, dry=False):
                     with open(os.path.join(ls_dest, os.path.basename(nome)), 'wb') as fh:
                         fh.write(z.read(nome))
                 n_ls += 1
+    # O Local Storage tambem guarda caminho de arquivo: uma chave
+    # cc-session-cwd-* por sessao e blobs JSON com o agrupamento por pasta.
+    # Copiado cru, o app pede para confiar num caminho que nao existe aqui.
+    if n_ls and not dry:
+        _reescrever_local_storage(ls_dest, mapa_bruto, para_posix)
+
     print("[ok] perfil do app: %d registros restaurados, %d arquivos de Local Storage"
           % (n_rec, n_ls))
+    if ilegiveis:
+        print("[warn] %d registro(s) ilegiveis na origem, copiados como estao:"
+              % len(ilegiveis))
+        for fn in ilegiveis[:5]:
+            print("        " + fn)
     return n_rec, n_ls
 
 

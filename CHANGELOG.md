@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.0] - 2026-08-28
+## [1.3.0] - 2026-08-29
 
 Makes the destination's sidebar a reproduction of the source's, pinned
 sessions included.
@@ -14,19 +14,29 @@ sessions included.
 
 - **`--faithful`.** Until now the importer rebuilt the app's session records
   from scratch, which necessarily produced new ids. Pinning does not survive
-  that: `pinnedOrder`, in the app's Local Storage, refers to each record's own
+  that: `pinnedOrder`, in the app's Local Storage, holds each record's own
   `local_<uuid>` id, so every regenerated id points at nothing. Faithful mode
   copies the original records instead and keeps session ids (`--keep-id`), so
-  those references stay valid.
-- **App profile transport (`_app-profile.zip`).** `export-all` now also bundles
-  the `local_*.json` records verbatim and the Local Storage LevelDB. The
-  records' `cwd`/`originCwd` are rewritten on import; the LevelDB is copied
-  byte for byte, since nothing in it holds a filesystem path -- only ids and
-  UI preferences (pinned order, grouping, sidebar width).
-- The destination's existing Local Storage is copied to
-  `leveldb.antes-do-import` before being replaced, and the directory is emptied
-  first so the result is exactly the source's file set (a mix leaves orphaned
-  `.ldb` files and a `CURRENT` pointing at the other set's `MANIFEST`).
+  those references stay valid. Measured on a real install: 31 pinned sessions,
+  30 of which land intact (the 31st is unreadable at the source -- see below).
+- **App profile transport (`_app-profile.zip`).** `export-all` also bundles the
+  `local_*.json` records verbatim and the Local Storage LevelDB.
+- **`localstorage_paths.py`.** Local Storage is not just ids and preferences:
+  it holds a `cc-session-cwd-local_<id>` key per session plus JSON blobs with
+  escaped paths (the sidebar's folder grouping). Copied as-is from Windows to
+  Linux, the app asks you to trust a `D:` path that does not exist there. This
+  rewrites them -- 53 of 391 keys on the real install. It needs `plyvel`,
+  because the values sit in snappy-compressed blocks and scanning bytes cannot
+  reach them; without it the Local Storage is still copied (pinning works) and
+  the tool prints how to finish the job.
+- The destination's Local Storage is copied to `leveldb.antes-do-import` before
+  being replaced, and the directory is emptied first so the result is exactly
+  the source's file set -- a mix leaves orphaned `.ldb` files and a `CURRENT`
+  pointing at the other set's `MANIFEST`.
+- Records that are unreadable at the source are copied byte for byte and
+  reported, instead of being skipped in silence. The real install had one: 533
+  bytes of zeros, the signature of an unclean shutdown, belonging to a pinned
+  session that does not open on Windows either.
 
 ### Requires
 
