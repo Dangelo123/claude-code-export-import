@@ -154,8 +154,9 @@ def find_account_dir(explicit=None):
 def app_profile_dir(explicit=None):
     """Pasta do perfil do Claude Desktop (a mae de claude-code-sessions).
 
-    E onde vive o Local Storage, que guarda o estado da barra lateral --
-    inclusive quais sessoes estao fixadas."""
+    E onde vivem os dois armazens do navegador que a barra lateral usa: o
+    Local Storage (largura, ordem, agrupamento) e o IndexedDB (o indice de
+    sessoes, inclusive quais estao fixadas)."""
     for base in candidate_app_store_bases(explicit):
         if os.path.isdir(base):
             return os.path.dirname(base)
@@ -170,6 +171,24 @@ def local_storage_dir(explicit=None):
         return None
     d = os.path.join(prof, "Local Storage", "leveldb")
     return d if os.path.isdir(d) else None
+
+
+def indexeddb_dirs(explicit=None):
+    """
+    Pastas de IndexedDB do app, uma por origem.
+
+    E aqui que mora o indice de sessoes que a interface le, incluindo quais
+    estao fixadas. Os local_*.json sao um espelho: restaurar so eles deixa 33
+    sessoes marcadas em disco e a barra lateral mostrando uma.
+    """
+    prof = app_profile_dir(explicit)
+    if not prof:
+        return []
+    raiz = os.path.join(prof, "IndexedDB")
+    if not os.path.isdir(raiz):
+        return []
+    return sorted(d for d in glob.glob(os.path.join(raiz, '*'))
+                  if os.path.isdir(d) and d.endswith('.leveldb'))
 
 
 def default_claude_home(explicit=None):

@@ -39,6 +39,15 @@ class Perfil(unittest.TestCase):
                       open(os.path.join(self.rec_dir, nome + '.json'), 'w',
                            encoding='utf-8'))
 
+        # o IndexedDB e o armazem que a interface le para saber o que esta
+        # fixado; sem ele o pinned nao aparece por mais que os registros
+        # tragam isStarred
+        self.idb_origem = os.path.join(self.tmp, 'origem', 'IndexedDB',
+                                       'https_claude.ai_0.indexeddb.leveldb')
+        os.makedirs(self.idb_origem)
+        with open(os.path.join(self.idb_origem, '000001.ldb'), 'wb') as fh:
+            fh.write(b'\x00starred\x00local_aaa\x00')
+
         self.out = os.path.join(self.tmp, 'bundle')
         os.makedirs(self.out)
         self.destino = os.path.join(self.tmp, 'destino', 'claude-code-sessions')
@@ -117,6 +126,44 @@ class Perfil(unittest.TestCase):
     def test_sem_perfil_no_bundle_nao_quebra(self):
         n = batch.import_app_profile(self.out, self._remap, app_store=self.destino)
         self.assertEqual(n, (0, 0))
+
+    def test_exporta_o_indexeddb(self):
+        self._exportar()
+        z = zipfile.ZipFile(os.path.join(self.out, batch.PROFILE_ZIP))
+        self.assertIn('indexeddb/https_claude.ai_0.indexeddb.leveldb/000001.ldb',
+                      z.namelist())
+        self.assertEqual(json.loads(z.read('profile.json'))['indexedDB'], 1)
+
+    def test_import_restaura_o_indexeddb(self):
+        self._exportar()
+        batch.import_app_profile(self.out, self._remap, app_store=self.destino)
+        dest = os.path.join(os.path.dirname(self.destino), 'IndexedDB',
+                            'https_claude.ai_0.indexeddb.leveldb', '000001.ldb')
+        self.assertTrue(os.path.isfile(dest))
+        self.assertIn(b'starred', open(dest, 'rb').read())
+
+    def test_indexeddb_vai_byte_a_byte(self):
+        # a serializacao do Blink prefixa cada string pelo tamanho; reescrever
+        # um caminho por outro de tamanho diferente corromperia o registro
+        self._exportar()
+        batch.import_app_profile(self.out, self._remap, app_store=self.destino)
+        dest = os.path.join(os.path.dirname(self.destino), 'IndexedDB',
+                            'https_claude.ai_0.indexeddb.leveldb', '000001.ldb')
+        self.assertEqual(open(dest, 'rb').read(),
+                         open(os.path.join(self.idb_origem, '000001.ldb'), 'rb').read())
+
+    def test_destino_com_indexeddb_proprio_e_salvo_antes(self):
+        alvo = os.path.join(os.path.dirname(self.destino), 'IndexedDB',
+                            'https_claude.ai_0.indexeddb.leveldb')
+        os.makedirs(alvo)
+        with open(os.path.join(alvo, 'antigo.ldb'), 'wb') as fh:
+            fh.write(b'do destino')
+        self._exportar()
+        batch.import_app_profile(self.out, self._remap, app_store=self.destino)
+        self.assertTrue(os.path.isfile(os.path.join(alvo + '.antes-do-import',
+                                                    'antigo.ldb')))
+        # e a pasta ficou so com os arquivos da origem
+        self.assertEqual(sorted(os.listdir(alvo)), ['000001.ldb'])
 
 
 if __name__ == '__main__':

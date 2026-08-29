@@ -5,6 +5,43 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-29
+
+Pinned sessions actually arrive.
+
+### Added
+
+- **IndexedDB transport.** 1.3.0 carried the app's session records and Local
+  Storage and claimed pinning survived. It did not: on the migrated machine 32
+  sessions had `isStarred: true` on disk, `pinnedOrder` listed all 31 ids, the
+  scope key and account matched -- and the sidebar's "Pinned" section was
+  empty, with the app's own row counter reporting `code.pinned: 0`. The state
+  the UI reads lives in a third store, `IndexedDB/https_claude.ai_0.
+  indexeddb.leveldb`, which was never copied. Pinning a session by hand in the
+  destination produced exactly one pinned row, which is what isolated it. With
+  IndexedDB copied, the destination reproduces the source's pinned list in the
+  same order, icons included.
+- **`--with-config`** carries `~/.claude.json` (MCP servers, per-project
+  permissions), `settings.json` and the desktop app's own JSON config. It is a
+  flag rather than the default because these files hold real credentials --
+  database passwords and API tokens in MCP env blocks -- and the bundle usually
+  ends up on an external drive; the export names every file whose contents look
+  like a secret. `buddy-tokens.json` and `ant-device-registry.json` are never
+  copied: a session token and a device registration belong to the machine.
+
+### Note on IndexedDB
+
+Its values use Blink's structured-clone serialization, where strings are
+length-prefixed, so a path cannot be swapped for one of a different length
+without corrupting the record. It is copied byte for byte. The paths a session
+actually opens with come from `local_*.json`, which is rewritten.
+
+### What the app itself does with the copy
+
+On first launch the app prunes a record it cannot parse (the zero-filled one
+described in 1.3.0), so the destination settles at 129 records where the source
+had 130. That is the app's own housekeeping, not a transport loss.
+
 ## [1.3.0] - 2026-08-29
 
 Makes the destination's sidebar a reproduction of the source's, pinned

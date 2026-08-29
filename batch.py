@@ -434,13 +434,16 @@ PROFILE_ZIP = '_app-profile.zip'
 
 def export_app_profile(out_dir, app_store=None):
     """
-    Leva o perfil do app: os registros local_*.json em si e o Local Storage.
+    Leva o perfil do app: os registros local_*.json, o Local Storage e o
+    IndexedDB.
 
-    Recriar os registros do zero perde o que so existe neles -- e o Local
-    Storage guarda pinnedOrder, que aponta para o id 'local_<uuid>' de cada
-    registro. Se o destino gera ids novos, todo o pinned se perde. Copiando os
-    registros originais e importando com --keep-id, os ids continuam validos e
-    a barra lateral chega igual: fixadas, agrupamento e ordem.
+    Recriar os registros do zero perde o que so existe neles, e os dois
+    armazens do navegador se dividem o estado da barra lateral: o Local
+    Storage guarda ordem, largura e agrupamento; o IndexedDB guarda o indice
+    de sessoes que a interface de fato le -- inclusive quais estao fixadas.
+    Sem o IndexedDB, 32 sessoes ficam marcadas em disco e a barra lateral
+    mostra "Pinned" vazio (medido). Todos apontam para o id 'local_<uuid>' do
+    registro, entao a importacao precisa preservar os ids (--keep-id).
     """
     import zipfile
     base, _, _ = csp.find_record_dir(app_store)
@@ -453,7 +456,7 @@ def export_app_profile(out_dir, app_store=None):
 
     ls = csp.local_storage_dir(app_store)
     path = os.path.join(out_dir, PROFILE_ZIP)
-    n_rec = n_ls = 0
+    n_rec = n_ls = n_idb = 0
     info = {"platform": sys.platform, "accounts": []}
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
         for root, _, files in os.walk(base):
@@ -479,11 +482,23 @@ def export_app_profile(out_dir, app_store=None):
                     # o LOCK do leveldb nao e legivel com o app aberto e nao
                     # faz falta: e um arquivo vazio recriado no destino
                     pass
+        for idb in csp.indexeddb_dirs(app_store):
+            origem = os.path.basename(idb)
+            for fn in sorted(os.listdir(idb)):
+                full = os.path.join(idb, fn)
+                if not os.path.isfile(full):
+                    continue
+                try:
+                    z.write(full, arcname='indexeddb/%s/%s' % (origem, fn))
+                    n_idb += 1
+                except (PermissionError, OSError):
+                    pass
         info["records"] = n_rec
         info["localStorage"] = n_ls
+        info["indexedDB"] = n_idb
         z.writestr('profile.json', json.dumps(info, ensure_ascii=False, indent=2))
-    print("[ok] perfil do app: %d registros + %d arquivos de Local Storage -> %s"
-          % (n_rec, n_ls, path))
+    print("[ok] perfil do app: %d registros, %d de Local Storage, %d de IndexedDB -> %s"
+          % (n_rec, n_ls, n_idb, path))
     return n_rec
 
 
@@ -515,14 +530,44 @@ def _reescrever_local_storage(ls_dir, mapa, para_posix):
         print("[warn] nao consegui reescrever os caminhos do Local Storage: %s" % e)
 
 
+def _preparar_leveldb(destino):
+    """
+    Guarda uma copia do LevelDB do destino e esvazia a pasta.
+
+    A copia porque a substituicao e total: se o app guardar ali algo cifrado
+    pelo cofre do sistema (DPAPI no Windows, keyring no Linux), o valor vindo
+    de outra maquina nao decifra. Esvaziar porque misturar arquivos dos dois
+    lados deixa .ldb orfaos e um CURRENT apontando para o MANIFEST do outro
+    conjunto -- o destino tem de ficar com exatamente os arquivos da origem.
+    """
+    if not os.path.isdir(destino):
+        os.makedirs(destino, exist_ok=True)
+        return
+    bak = destino + '.antes-do-import'
+    if not os.path.isdir(bak):
+        import shutil
+        shutil.copytree(destino, bak, ignore_dangling_symlinks=True)
+        print("[ok] copia do destino em %s" % bak)
+    for fn in os.listdir(destino):
+        alvo = os.path.join(destino, fn)
+        if os.path.isfile(alvo):
+            try:
+                os.remove(alvo)
+            except OSError:
+                pass
+
+
 def import_app_profile(src_dir, remap, app_store=None, dry=False,
                        mapa_bruto=None, para_posix=True):
     """
-    Restaura os registros com o cwd reescrito e o Local Storage como esta.
+    Restaura os registros com o cwd reescrito e os dois armazens do navegador.
 
-    Os ids nao mudam -- e isso que faz o pinned continuar valendo. O Local
-    Storage vai byte a byte porque e um LevelDB: reescrever seria arriscado, e
-    nada la dentro guarda caminho de arquivo (so ids e preferencias de UI).
+    Os ids nao mudam -- e isso que faz o pinned continuar valendo. Os LevelDB
+    vao arquivo a arquivo; no Local Storage os caminhos sao reescritos depois
+    (ver _reescrever_local_storage). No IndexedDB nao sao: os valores usam a
+    serializacao do Blink, com strings prefixadas pelo tamanho, e trocar um
+    caminho por outro de tamanho diferente corromperia o registro. Os caminhos
+    que a sessao realmente usa vem do local_*.json, que e reescrito.
     """
     import zipfile
     src = os.path.join(src_dir, PROFILE_ZIP)
@@ -537,30 +582,12 @@ def import_app_profile(src_dir, remap, app_store=None, dry=False,
         return 0, 0
     ls_dest = os.path.join(csp.app_profile_dir(app_store), 'Local Storage', 'leveldb')
 
-    # O Local Storage do destino e substituido inteiro. Se o app guardar ali
-    # algo cifrado pelo cofre do sistema (DPAPI no Windows, keyring no Linux),
-    # o valor vindo de outra maquina nao decifra e o login cai. Guardar uma
-    # copia deixa isso reversivel.
-    if not dry and os.path.isdir(ls_dest):
-        bak = ls_dest + ".antes-do-import"
-        if not os.path.isdir(bak):
-            import shutil
-            shutil.copytree(ls_dest, bak, ignore_dangling_symlinks=True)
-            print("[ok] copia do Local Storage do destino em %s" % bak)
+    if not dry:
+        _preparar_leveldb(ls_dest)
 
-        # Esvazia antes de escrever: misturar arquivos dos dois lados deixa .ldb
-        # orfaos e um CURRENT apontando para o MANIFEST do outro conjunto. O
-        # destino tem de ficar com exatamente os arquivos da origem.
-        if not dry and os.path.isdir(ls_dest):
-            for fn in os.listdir(ls_dest):
-                alvo = os.path.join(ls_dest, fn)
-                if os.path.isfile(alvo):
-                    try:
-                        os.remove(alvo)
-                    except OSError:
-                        pass
-
-    n_rec = n_ls = 0
+    n_rec = n_ls = n_idb = 0
+    idb_raiz = os.path.join(csp.app_profile_dir(app_store), 'IndexedDB')
+    idb_prontos = set()
     ilegiveis = []
     with zipfile.ZipFile(src) as z:
         for nome in z.namelist():
@@ -600,14 +627,28 @@ def import_app_profile(src_dir, remap, app_store=None, dry=False,
                     with open(os.path.join(ls_dest, os.path.basename(nome)), 'wb') as fh:
                         fh.write(z.read(nome))
                 n_ls += 1
+            elif nome.startswith('indexeddb/') and not nome.endswith('/'):
+                partes = nome.split('/')
+                if len(partes) != 3:
+                    continue
+                origem, fn = partes[1], partes[2]
+                destino = os.path.join(idb_raiz, origem)
+                if not dry and destino not in idb_prontos:
+                    _preparar_leveldb(destino)
+                    idb_prontos.add(destino)
+                if not dry:
+                    with open(os.path.join(destino, fn), 'wb') as fh:
+                        fh.write(z.read(nome))
+                n_idb += 1
+
     # O Local Storage tambem guarda caminho de arquivo: uma chave
     # cc-session-cwd-* por sessao e blobs JSON com o agrupamento por pasta.
     # Copiado cru, o app pede para confiar num caminho que nao existe aqui.
     if n_ls and not dry:
         _reescrever_local_storage(ls_dest, mapa_bruto, para_posix)
 
-    print("[ok] perfil do app: %d registros restaurados, %d arquivos de Local Storage"
-          % (n_rec, n_ls))
+    print("[ok] perfil do app: %d registros, %d de Local Storage, %d de IndexedDB"
+          % (n_rec, n_ls, n_idb))
     if ilegiveis:
         print("[warn] %d registro(s) ilegiveis na origem, copiados como estao:"
               % len(ilegiveis))
