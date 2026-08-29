@@ -432,6 +432,18 @@ def export_extras(home, out_dir):
 PROFILE_ZIP = '_app-profile.zip'
 
 
+def _pular_no_leveldb(nome):
+    """
+    LOCK nao viaja.
+
+    E um arquivo vazio que o proprio leveldb cria, e no Windows o app o mantem
+    aberto com acesso exclusivo. Tentar zipa-lo falha na leitura -- mas
+    ZipFile.write ja escreveu o cabecalho da entrada, entao sobrava no pacote
+    uma entrada vazia que ninguem conseguia ler e que a contagem nao via.
+    """
+    return nome == 'LOCK'
+
+
 def export_app_profile(out_dir, app_store=None):
     """
     Leva o perfil do app: os registros local_*.json, o Local Storage e o
@@ -473,26 +485,18 @@ def export_app_profile(out_dir, app_store=None):
         if ls:
             for fn in sorted(os.listdir(ls)):
                 full = os.path.join(ls, fn)
-                if not os.path.isfile(full):
+                if not os.path.isfile(full) or _pular_no_leveldb(fn):
                     continue
-                try:
-                    z.write(full, arcname='local-storage/' + fn)
-                    n_ls += 1
-                except (PermissionError, OSError):
-                    # o LOCK do leveldb nao e legivel com o app aberto e nao
-                    # faz falta: e um arquivo vazio recriado no destino
-                    pass
+                z.write(full, arcname='local-storage/' + fn)
+                n_ls += 1
         for idb in csp.indexeddb_dirs(app_store):
             origem = os.path.basename(idb)
             for fn in sorted(os.listdir(idb)):
                 full = os.path.join(idb, fn)
-                if not os.path.isfile(full):
+                if not os.path.isfile(full) or _pular_no_leveldb(fn):
                     continue
-                try:
-                    z.write(full, arcname='indexeddb/%s/%s' % (origem, fn))
-                    n_idb += 1
-                except (PermissionError, OSError):
-                    pass
+                z.write(full, arcname='indexeddb/%s/%s' % (origem, fn))
+                n_idb += 1
         info["records"] = n_rec
         info["localStorage"] = n_ls
         info["indexedDB"] = n_idb

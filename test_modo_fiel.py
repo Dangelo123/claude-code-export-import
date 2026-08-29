@@ -75,6 +75,27 @@ class Perfil(unittest.TestCase):
         self.assertEqual(info['records'], 2)
         self.assertEqual(info['accounts'], ['conta-1'])
 
+    def test_lock_nao_entra_no_pacote(self):
+        # no Windows o app mantem o LOCK aberto com acesso exclusivo; zipa-lo
+        # falhava na leitura DEPOIS de o cabecalho da entrada ja estar escrito,
+        # deixando no pacote uma entrada vazia que ninguem lia
+        self._exportar()
+        z = zipfile.ZipFile(os.path.join(self.out, batch.PROFILE_ZIP))
+        self.assertFalse([n for n in z.namelist() if n.endswith('/LOCK')])
+        vazias = [n for n in z.namelist()
+                  if not n.endswith('/') and z.getinfo(n).file_size == 0]
+        self.assertEqual(vazias, [])
+
+    def test_contagem_bate_com_o_pacote(self):
+        self._exportar()
+        z = zipfile.ZipFile(os.path.join(self.out, batch.PROFILE_ZIP))
+        info = json.loads(z.read('profile.json'))
+        for prefixo, campo in (('local-storage/', 'localStorage'),
+                               ('indexeddb/', 'indexedDB'),
+                               ('records/', 'records')):
+            reais = len([n for n in z.namelist() if n.startswith(prefixo)])
+            self.assertEqual(info[campo], reais, prefixo)
+
     def test_local_storage_vai_byte_a_byte(self):
         self._exportar()
         z = zipfile.ZipFile(os.path.join(self.out, batch.PROFILE_ZIP))
