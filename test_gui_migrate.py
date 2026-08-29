@@ -90,6 +90,27 @@ try:
     app._load_path_map(empty)
     check("pasta sem template nao quebra", app.map_entries == [])
 
+    # --- as opcoes novas ---
+    # "reproduzir a barra lateral" vem LIGADO de proposito: sem ela os ids
+    # mudam e todo pinned aponta para o nada, que foi o defeito da migracao real
+    check("reproduzir a barra lateral vem ligado", app.mig_faithful.get() is True)
+    check("listar sessoes ocultas vem desligado", app.mig_index_all.get() is False)
+    check("levar config vem desligado", app.mig_with_config.get() is False)
+
+    check("import-all aceita faithful", 'faithful' in gui._IMPORT_ALL_DEFAULTS)
+    check("import-all aceita index_all", 'index_all' in gui._IMPORT_ALL_DEFAULTS)
+    check("export-all aceita with_config", 'with_config' in gui._EXPORT_ALL_DEFAULTS)
+
+    # o que a GUI monta tem de casar com o que o nucleo le
+    import inspect
+
+    import batch
+    for fn, padroes in ((batch.do_export_all, gui._EXPORT_ALL_DEFAULTS),
+                        (batch.do_import_all, gui._IMPORT_ALL_DEFAULTS)):
+        fonte = inspect.getsource(fn)
+        faltando = [k for k in padroes if ('args.' + k) not in fonte]
+        check("%s usa tudo que a GUI passa" % fn.__name__, not faltando, str(faltando))
+
     print()
     if fails:
         print("FAILURES (%d):" % len(fails))

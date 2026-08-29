@@ -38,10 +38,12 @@ _IMPORT_DEFAULTS = dict(
     no_app_index=False, bump_version=False, no_sidecar=False, with_history=False,
     dry_run=False,
 )
-_EXPORT_ALL_DEFAULTS = dict(out=None, claude_home=None, app_store=None, dry_run=False)
+_EXPORT_ALL_DEFAULTS = dict(out=None, claude_home=None, app_store=None,
+                            with_config=False, dry_run=False)
 _IMPORT_ALL_DEFAULTS = dict(
     src=None, path_map=None, claude_home=None, app_store=None, keep_id=False,
-    no_app_index=False, with_history=False, retention_days=999999, dry_run=False,
+    no_app_index=False, index_all=False, faithful=False, with_history=False,
+    retention_days=999999, dry_run=False,
 )
 
 
@@ -268,6 +270,15 @@ class App(ttk.Frame):
         self.mig_out_var = tk.StringVar()
         ttk.Entry(r, textvariable=self.mig_out_var).pack(side="left", fill="x", expand=True)
         ttk.Button(r, text="Browse…", command=self._pick_mig_out).pack(side="left", padx=(6, 0))
+
+        self.mig_with_config = tk.BooleanVar(value=False)
+        ttk.Checkbutton(s1, text="Also take my settings and MCP servers",
+                        variable=self.mig_with_config).pack(anchor="w", pady=(8, 0))
+        ttk.Label(s1, text="Otherwise the new machine starts with every integration to set up "
+                           "again. These files can hold passwords and API tokens — the log "
+                           "names each one that does.",
+                  foreground="#777", wraplength=520, justify="left").pack(anchor="w", padx=(20, 0))
+
         self.btn_export_all = ttk.Button(s1, text="Export everything",
                                          command=self._do_export_all)
         self.btn_export_all.pack(anchor="e", pady=(8, 0))
@@ -281,9 +292,27 @@ class App(ttk.Frame):
         ttk.Entry(r, textvariable=self.mig_src_var).pack(side="left", fill="x", expand=True)
         ttk.Button(r, text="Browse…", command=self._pick_mig_src).pack(side="left", padx=(6, 0))
 
+        # As opcoes ficam ANTES da lista: a lista se estica com o tamanho da
+        # janela e empurraria para fora da tela justamente a opcao que decide
+        # se a barra lateral chega igual.
+        self.mig_faithful = tk.BooleanVar(value=True)
+        ttk.Checkbutton(s2, text="Reproduce my sidebar (pinned sessions, order, grouping)",
+                        variable=self.mig_faithful).pack(anchor="w", pady=(10, 0))
+        ttk.Label(s2, text="Keeps the original session ids, without which every pin points at "
+                           "nothing. Quit the Claude app before restoring.",
+                  foreground="#777", wraplength=560, justify="left").pack(anchor="w", padx=(20, 0))
+
+        self.mig_index_all = tk.BooleanVar(value=False)
+        ttk.Checkbutton(s2, text="Also list sessions that never showed in the old sidebar",
+                        variable=self.mig_index_all).pack(anchor="w", pady=(6, 0))
+        ttk.Label(s2, text="Off by default, so the new machine shows what the old one showed. "
+                           "Turning this on surfaces sessions started from the terminal, "
+                           "abandoned branches included.",
+                  foreground="#777", wraplength=560, justify="left").pack(anchor="w", padx=(20, 0))
+
         ttk.Label(s2, text="Where each folder lives on THIS machine "
                            "(leave blank to skip that project):",
-                  foreground="#555").pack(anchor="w", pady=(10, 2))
+                  foreground="#555").pack(anchor="w", pady=(12, 2))
 
         # a scrollable list of "old path -> [entry]" rows
         wrap = ttk.Frame(s2); wrap.pack(fill="both", expand=True)
@@ -392,7 +421,8 @@ class App(ttk.Frame):
         def work():
             return _run(batch.do_export_all, _EXPORT_ALL_DEFAULTS,
                         out=out, claude_home=self._home_or_none(),
-                        app_store=self._store_or_none())
+                        app_store=self._store_or_none(),
+                        with_config=self.mig_with_config.get())
 
         self._busy_run(work, "Exported",
                        "Everything bundled.\n\nCopy this folder to the new machine, "
@@ -414,8 +444,15 @@ class App(ttk.Frame):
                 "Restore everything?",
                 "This adds %d project path(s) to this machine's Claude.\n\n"
                 "Existing sessions are never deleted or modified.\n\n"
-                "Close the Claude app first — it rewrites its index when it quits."
-                % len(mapping)):
+                "%s"
+                % (len(mapping),
+                   # em modo fiel a barra lateral do destino e substituida pela
+                   # da origem, e os dois armazens sao lidos so na inicializacao
+                   "Quit the Claude app before continuing. Your current sidebar "
+                   "will be replaced by the one from the bundle (a copy of it is "
+                   "kept next to it, as .antes-do-import)."
+                   if self.mig_faithful.get() else
+                   "Close the Claude app first — it rewrites its index when it quits.")):
             return
 
         # the core reads the map from a file; write the edited one next to the bundle
@@ -432,6 +469,8 @@ class App(ttk.Frame):
                         src=src, path_map=map_path,
                         claude_home=self._home_or_none(),
                         app_store=self._store_or_none(),
+                        faithful=self.mig_faithful.get(),
+                        index_all=self.mig_index_all.get(),
                         dry_run=preview)
 
         self._busy_run(work,
