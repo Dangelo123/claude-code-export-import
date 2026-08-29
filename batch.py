@@ -166,6 +166,8 @@ def do_export_all(args):
 
     export_extras(home, out_dir)
     export_app_profile(out_dir, args.app_store)
+    if args.with_config:
+        export_config(home, out_dir, args.app_store)
 
     print("\n[ok] %d bundles -> %s" % (len(manifest), out_dir))
     print("[ok] fill in %s and pass it to import-all --path-map" % tmpl_path)
@@ -280,6 +282,13 @@ def do_import_all(args):
         if fiel:
             import_app_profile(src_dir, remap, args.app_store, args.dry_run,
                                mapa_bruto=mapping, para_posix=to_posix)
+
+        restaurados = import_config(home, src_dir, rewrite, args.app_store,
+                                    args.dry_run)
+        if restaurados and not args.dry_run:
+            # settings.json da origem sobrescreveu o que ensure_retention criou;
+            # reaplica para nao voltar a podar transcript com mais de 30 dias
+            ensure_retention(home, args.retention_days)
             print("     >>> feche e reabra o app: o Local Storage so e relido"
                   " na inicializacao")
 
@@ -294,6 +303,103 @@ def do_import_all(args):
 EXTRAS_ZIP = '_extras.zip'
 PROJECT_EXTRA_DIRS = ('memory', 'plans')
 HOME_EXTRA_FILES = ('CLAUDE.md',)
+
+CONFIG_ZIP = '_config.zip'
+# ~/.claude.json guarda os servidores MCP e as permissoes por projeto; sem ele
+# a maquina nova comeca com as integracoes todas por reconfigurar
+CONFIG_HOME_FILES = ('.claude.json',)
+CONFIG_CLAUDE_FILES = ('settings.json', 'settings.local.json')
+# arquivos do perfil do app que sao do APARELHO, nao do usuario: levar um
+# token de sessao ou o registro de dispositivo para outra maquina nao ajuda e
+# espalha credencial
+CONFIG_PROFILE_SKIP = ('buddy-tokens.json', 'ant-device-registry.json')
+
+
+def _tem_credencial(texto):
+    """Heuristica: o arquivo carrega segredo que vai viajar no bundle?"""
+    return bool(re.search(r'"[^"]*(secret|token|password|api_?key)[^"]*"\s*:\s*"[^"]{8,}"',
+                          texto, re.I))
+
+
+def export_config(home, out_dir, app_store=None):
+    """
+    Leva a configuracao: servidores MCP, permissoes, ajustes do app.
+
+    Fica fora do fluxo normal (--with-config) porque estes arquivos costumam
+    guardar credencial de verdade -- variaveis de ambiente de servidor MCP,
+    por exemplo -- e o bundle acaba num disco externo. Quem pede, e avisado do
+    que vai junto.
+    """
+    import zipfile
+    path = os.path.join(out_dir, CONFIG_ZIP)
+    lar = os.path.expanduser('~')
+    prof = csp.app_profile_dir(app_store)
+    com_segredo, n = [], 0
+
+    def guarda(z, origem, arcname):
+        nonlocal n
+        if not os.path.isfile(origem):
+            return
+        z.write(origem, arcname=arcname)
+        n += 1
+        try:
+            if _tem_credencial(open(origem, encoding='utf-8', errors='ignore').read()):
+                com_segredo.append(arcname)
+        except Exception:
+            pass
+
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
+        for fn in CONFIG_HOME_FILES:
+            guarda(z, os.path.join(lar, fn), 'home/' + fn)
+        for fn in CONFIG_CLAUDE_FILES:
+            guarda(z, os.path.join(home, fn), 'claude/' + fn)
+        if prof and os.path.isdir(prof):
+            for fn in sorted(os.listdir(prof)):
+                if not fn.endswith('.json') or fn in CONFIG_PROFILE_SKIP:
+                    continue
+                guarda(z, os.path.join(prof, fn), 'profile/' + fn)
+
+    print("[ok] config: %d arquivos -> %s" % (n, path))
+    if com_segredo:
+        print("[!!] estes carregam credencial e viajam no bundle:")
+        for a in com_segredo:
+            print("        " + a)
+    return n
+
+
+def import_config(home, src_dir, rewrite, app_store=None, dry=False):
+    """Restaura a configuracao, reescrevendo os caminhos que ela guarda."""
+    import zipfile
+    path = os.path.join(src_dir, CONFIG_ZIP)
+    if not os.path.isfile(path):
+        return 0
+    lar = os.path.expanduser('~')
+    prof = csp.app_profile_dir(app_store)
+    n = 0
+    with zipfile.ZipFile(path) as z:
+        for nome in z.namelist():
+            if nome.startswith('home/'):
+                dest = os.path.join(lar, nome[len('home/'):])
+            elif nome.startswith('claude/'):
+                dest = os.path.join(home, nome[len('claude/'):])
+            elif nome.startswith('profile/') and prof:
+                dest = os.path.join(prof, nome[len('profile/'):])
+            else:
+                continue
+            dados = z.read(nome)
+            try:
+                # sao .json: o caminho aparece escapado, inclusive nas CHAVES
+                # de "projects" -- reescrever o texto inteiro cobre os dois
+                dados = rewrite(dados.decode('utf-8')).encode('utf-8')
+            except UnicodeDecodeError:
+                pass
+            if not dry:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, 'wb') as fh:
+                    fh.write(dados)
+            n += 1
+    print("[ok] config: %d arquivos restaurados" % n)
+    return n
 
 
 def export_extras(home, out_dir):
@@ -620,6 +726,10 @@ def main():
     pe.add_argument('--out', required=True, help='output directory for the bundles')
     pe.add_argument('--claude-home', default=None)
     pe.add_argument('--app-store', default=None)
+    pe.add_argument('--with-config', action='store_true',
+                    help='leva tambem ~/.claude.json, settings.json e a config'
+                         ' do app (servidores MCP, permissoes). Pode conter'
+                         ' credencial: o comando avisa quais arquivos.')
     pe.add_argument('--dry-run', action='store_true')
     pe.set_defaults(func=do_export_all)
 
