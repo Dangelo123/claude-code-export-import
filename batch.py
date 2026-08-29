@@ -228,7 +228,7 @@ def do_import_all(args):
             keep_id=args.keep_id,
             keep_paths=True,
             git_branch=None, title_suffix=None, title=None,
-            app_store=args.app_store, no_app_index=args.no_app_index,
+            app_store=args.app_store, no_app_index=args.no_app_index, index_all=args.index_all,
             bump_version=False, no_sidecar=False, with_history=args.with_history,
             dry_run=False)
         # snapshot the destination so the deep rewrite only ever touches the
@@ -426,6 +426,9 @@ def main():
     pi.add_argument('--app-store', default=None)
     pi.add_argument('--keep-id', action='store_true')
     pi.add_argument('--no-app-index', action='store_true')
+    pi.add_argument('--index-all', action='store_true',
+                    help='cria registro tambem para sessoes que nao'
+                         ' apareciam na interface da origem')
     pi.add_argument('--with-history', action='store_true')
     pi.add_argument('--retention-days', type=int, default=999999,
                     help='cleanupPeriodDays to write before importing '

@@ -89,7 +89,16 @@ def candidate_app_store_bases(explicit=None):
         bases.append(os.path.expanduser('~/Library/Application Support/Claude/claude-code-sessions'))
     else:
         bases.append(os.path.expanduser('~/.config/Claude/claude-code-sessions'))
-    return bases
+    # No Windows com a versao da Store, %APPDATA%\Claude e uma junction para
+    # o LocalCache do pacote: as duas bases sao a MESMA pasta, e sem isto todo
+    # registro e lido e contado duas vezes.
+    unicas, vistos = [], set()
+    for b in bases:
+        chave = os.path.normcase(os.path.realpath(b))
+        if chave not in vistos:
+            vistos.add(chave)
+            unicas.append(b)
+    return unicas
 
 def find_record_by_cli(cli_id, explicit=None):
     """Find the app record (local_*.json) whose cliSessionId == cli_id, in any base."""
@@ -116,6 +125,31 @@ def find_record_dir(explicit=None):
         if fallback[0] is None and os.path.isdir(base):
             fallback = (base, None, None)
     return fallback
+
+def find_account_dir(explicit=None):
+    """
+    Locate <base>/<accountUuid>[/<groupUuid>] for a target that has never run a
+    Code session -- exactly the migration case: the app is freshly installed and
+    holds zero local_*.json to clone.
+
+    Signing in is enough to create the account folder (verified on a clean
+    install), so that folder is the one thing we cannot invent: the app only
+    reads records under the UUID of the account that is signed in.
+
+    Returns (base, rec_dir) or (None, None).
+    """
+    for base in candidate_app_store_bases(explicit):
+        if not os.path.isdir(base):
+            continue
+        accounts = [d for d in glob.glob(os.path.join(base, '*')) if os.path.isdir(d)]
+        if not accounts:
+            continue
+        acc = max(accounts, key=os.path.getmtime)
+        groups = [d for d in glob.glob(os.path.join(acc, '*')) if os.path.isdir(d)]
+        rec_dir = max(groups, key=os.path.getmtime) if groups else             os.path.join(acc, str(uuid.uuid4()))
+        return base, rec_dir
+    return None, None
+
 
 def default_claude_home(explicit=None):
     return os.path.abspath(os.path.expanduser(
@@ -158,11 +192,32 @@ def list_sessions(claude_home=None, app_store=None, include_archived=False):
     out.sort(key=lambda r: r['last'], reverse=True)
     return out
 
-def write_app_index(base, template_path, cli_id, cwd, title, title_source, dry):
-    """Create local_<uuid>.json (the record the app uses to list/title the session),
-       by cloning an existing local record and overriding the key fields."""
-    rec_dir = os.path.dirname(template_path)
-    o = json.load(open(template_path, encoding='utf-8'))
+# shape of a record with nothing inherited -- used when the destination has no
+# local_*.json to clone (fresh install). Mirrors the fields the app always writes.
+BLANK_RECORD = {
+    'alwaysAllowedReasons': [],
+    'bridgeSessionIds': [],
+    'enabledMcpTools': {},
+    'permissionMode': 'default',
+    'sessionPermissionUpdates': [],
+    'spawnSeed': {},
+}
+
+
+def write_app_index(base, template_path, cli_id, cwd, title, title_source, dry,
+                    rec_dir=None, archived=False):
+    """Create local_<uuid>.json (the record the app uses to list/title the session).
+
+    Clones an existing record when there is one; on a fresh install there is
+    none, so it falls back to BLANK_RECORD and writes into the signed-in
+    account folder (rec_dir)."""
+    if template_path:
+        rec_dir = os.path.dirname(template_path)
+        o = json.load(open(template_path, encoding='utf-8'))
+    else:
+        if not rec_dir:
+            raise ValueError('write_app_index needs template_path or rec_dir')
+        o = dict(BLANK_RECORD)
     new_local = 'local_' + str(uuid.uuid4())
     now = int(time.time() * 1000)
     o['sessionId'] = new_local
@@ -174,7 +229,7 @@ def write_app_index(base, template_path, cli_id, cwd, title, title_source, dry):
     o['createdAt'] = now
     o['lastFocusedAt'] = now
     o['lastActivityAt'] = now
-    o['isArchived'] = False
+    o['isArchived'] = archived
     o['bridgeSessionIds'] = []
     # drop fields that should not be inherited from the template
     for k in ('worktreeName', 'worktreePath', 'prNumber', 'prUrl', 'prRepository',
@@ -182,6 +237,8 @@ def write_app_index(base, template_path, cli_id, cwd, title, title_source, dry):
               'planPath', 'chromeTabGroupId'):
         o.pop(k, None)
     dest = os.path.join(rec_dir, new_local + '.json')
+    if not dry:
+        os.makedirs(rec_dir, exist_ok=True)
     if dry:
         print(f" [app-index] would create {os.path.relpath(dest, base)}  (title={title!r}, source={title_source})")
         return dest
@@ -190,6 +247,25 @@ def write_app_index(base, template_path, cli_id, cwd, title, title_source, dry):
     return dest
 
 # ---------------------------------------------------------------------- export
+def first_user_message(lines, limite=60):
+    """Primeira fala real do usuario -- ultimo recurso de titulo, antes de
+    cair no nome da pasta (que produz varias sessoes chamadas ClaudeNode)."""
+    for ln in lines:
+        try:
+            o = json.loads(ln)
+        except Exception:
+            continue
+        if o.get("type") != "user":
+            continue
+        c = (o.get("message") or {}).get("content")
+        if isinstance(c, list):
+            c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
+        if isinstance(c, str) and c.strip() and not c.lstrip().startswith("<"):
+            t = " ".join(c.split())
+            return t[:limite].rstrip() + ("..." if len(t) > limite else "")
+    return None
+
+
 def do_export(args):
     src = os.path.abspath(args.src)
     if not os.path.isfile(src):
@@ -203,21 +279,38 @@ def do_export(args):
     meta = {"cliSessionId": sess_id,
             "cwd": detect_old_cwd(lines),
             "title": None, "titleSource": None,
-            "model": None, "effort": None}
+            "model": None, "effort": None,
+            # a origem mostrava esta sessao na interface? Sem registro no app
+            # ela existe em disco e nao aparece em lugar nenhum. Recriar
+            # registro para todas enche o destino de sessoes que o usuario
+            # nunca viu -- em especial os ramos abandonados de retomada.
+            "hadAppRecord": False, "isArchived": False}
+
+    # titulos gravados no proprio transcript, na prioridade que o app usa:
+    # o nome dado pelo usuario vence o gerado automaticamente
+    custom_title = ai_title = None
+    for ln in lines:
+        try:
+            o = json.loads(ln)
+        except Exception:
+            continue
+        if o.get("type") == "custom-title" and o.get("customTitle"):
+            custom_title = o["customTitle"]
+        elif o.get("type") == "ai-title" and o.get("aiTitle"):
+            ai_title = o["aiTitle"]
+    meta["customTitle"] = custom_title
+    meta["aiTitle"] = ai_title
+    meta["firstUserMessage"] = first_user_message(lines)
+
     rec, _ = find_record_by_cli(sess_id, args.app_store)
     if rec:
         meta.update({"title": rec.get("title"), "titleSource": rec.get("titleSource"),
                      "cwd": rec.get("cwd") or meta["cwd"],
-                     "model": rec.get("model"), "effort": rec.get("effort")})
+                     "model": rec.get("model"), "effort": rec.get("effort"),
+                     "hadAppRecord": True,
+                     "isArchived": bool(rec.get("isArchived"))})
     else:
-        # fallback: title = last ai-title line in the jsonl
-        for ln in lines:
-            try:
-                o = json.loads(ln)
-                if o.get('type') == 'ai-title' and o.get('aiTitle'):
-                    meta["title"] = o['aiTitle']
-            except Exception:
-                pass
+        meta["title"] = custom_title or ai_title
 
     if args.dry_run:
         print(f"[dry] zip -> {out}\n  + {os.path.basename(src)}  + meta.json (title={meta['title']!r})")
@@ -395,28 +488,44 @@ def do_import(args):
 
         # ---- PIECE 2: the desktop app index record (gives the session a title + listing) ----
         if not args.no_app_index:
-            base, rec_dir, template = find_record_dir(args.app_store)
-            if not template:
-                tried = "\n        ".join(candidate_app_store_bases(args.app_store)) or "(none)"
-                print(f"[warn] no local_*.json record found. Bases searched:\n        {tried}")
-                print("       open the app, sign in, and use one Code session at least once")
-                print("       (that creates the account folder), then re-run import.")
+            # espelha a visibilidade da origem: sessao que nao tinha registro
+            # la nao aparecia na interface, e criar um aqui inventaria uma
+            # sessao que o usuario nunca viu. --index-all forca o contrario.
+            visivel = meta.get("hadAppRecord", True) or args.index_all
+            if not visivel:
+                print("[skip] app record: sem registro na origem, "
+                      "fica so em disco (--index-all lista mesmo assim)")
             else:
-                # app title: --title > meta(bundle) > last ai-title > basename(cwd)
-                title = args.title or meta.get('title')
-                if not title:
-                    for ln in out_lines:
-                        try:
-                            oo = json.loads(ln)
-                            if oo.get('type') == 'ai-title' and oo.get('aiTitle'):
-                                title = oo['aiTitle']
-                        except Exception:
-                            pass
-                title = title or os.path.basename(target_cwd.rstrip('\\/'))
-                # keep it as 'user' so the app does not regenerate the title
-                src_choice = 'user' if (args.title or meta.get('title')) else 'auto'
-                rec = write_app_index(base, template, new_sid, target_cwd, title, src_choice, args.dry_run)
-                print(f"[ok] app record : {rec}")
+                base, rec_dir, template = find_record_dir(args.app_store)
+                if not template:
+                    # instalacao nova: nao ha o que clonar. O login ja criou a
+                    # pasta da conta, que e a unica coisa que nao da para
+                    # inventar -- monta o registro do zero ali dentro.
+                    base, rec_dir = find_account_dir(args.app_store)
+                if not rec_dir:
+                    print("[warn] no signed-in account found. Bases searched:")
+                    for b in candidate_app_store_bases(args.app_store):
+                        print("        " + b)
+                    print("       open the app and sign in (that creates the")
+                    print("       account folder), then re-run import.")
+                else:
+                    # o nome dado pelo usuario vence o gerado; so entao a
+                    # primeira mensagem; o nome da pasta e ultimo recurso
+                    # porque produz varias sessoes chamadas ClaudeNode.
+                    title = (args.title or meta.get("customTitle")
+                             or meta.get("title") or meta.get("aiTitle")
+                             or meta.get("firstUserMessage")
+                             or first_user_message(out_lines)
+                             or os.path.basename(target_cwd.rstrip(chr(92) + "/")))
+                    if args.title or meta.get("customTitle"):
+                        src_choice = "user"
+                    else:
+                        src_choice = meta.get("titleSource") or "auto"
+                    rec = write_app_index(base, template, new_sid, target_cwd,
+                                          title, src_choice, args.dry_run,
+                                          rec_dir=rec_dir,
+                                          archived=bool(meta.get("isArchived")))
+                    print(f"[ok] app record : {rec}")
 
         print(f"[ok] installed  : {dest_jsonl}")
         print("     >>> Relaunch Claude (Quit + reopen) — the session shows up in the project's Recents.")
@@ -463,6 +572,8 @@ def main():
     pi.add_argument('--title', default=None, help='sidebar title (app record, titleSource=user)')
     pi.add_argument('--app-store', default=None, help='claude-code-sessions folder (default: auto per OS)')
     pi.add_argument('--no-app-index', action='store_true', help='do not create the app record (jsonl only)')
+    pi.add_argument('--index-all', action='store_true',
+                     help='cria registro tambem para sessoes que nao apareciam na interface da origem')
     pi.add_argument('--bump-version', action='store_true', help='set version to that of a local session')
     pi.add_argument('--no-sidecar', action='store_true', help='do not copy the sidecar folder')
     pi.add_argument('--with-history', action='store_true', help='register prompts in history.jsonl')

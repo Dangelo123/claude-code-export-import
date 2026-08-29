@@ -5,6 +5,46 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-08-28
+
+Fixes what a real Windows → CachyOS migration exposed: every session landed on
+disk, yet the destination's sidebar looked wrong. Three separate causes, none of
+them lost data.
+
+### Added
+
+- **App records on a fresh install.** The importer could only build the record
+  the sidebar reads by *cloning an existing one* — and a newly installed app has
+  none, which is precisely the migration case. It warned and moved on, leaving
+  sessions on disk but invisible. It now synthesises the record inside the
+  signed-in account folder. That folder is the one thing it will not invent:
+  the app only reads records under the UUID of the account that is signed in,
+  so signing in remains a prerequisite (and is enough — no session needed).
+- **`--index-all`** to list sessions the source itself never showed.
+
+### Fixed
+
+- **Titles fell back to the folder name.** Only `ai-title` was read, so the 132
+  sessions the user had renamed (of 184) showed up as `ClaudeNode` or
+  `ClaudeCowork_MeepGreenfield`, repeated down the sidebar. The chain is now
+  `custom-title` → `ai-title` → source record → first user message → folder name.
+- **Sessions that were invisible at the source became visible at the
+  destination.** Creating a record for *every* transcript surfaced 108 sessions
+  the app had never listed — mostly abandoned resume branches — which read as
+  duplicates. `meta.json` now carries `hadAppRecord` and `isArchived`, and the
+  importer mirrors them.
+- **Records counted and read twice on Windows.** With the Store build,
+  `%APPDATA%\Claude` is a junction into the package's `LocalCache`, so both
+  candidate paths are the same folder. Bases are now deduplicated by real path.
+
+### Note on deduplication
+
+Sessions sharing a title are *not* duplicates. Measured on a 184-session corpus:
+71 look redundant, but none is a prefix or subset of its sibling — together they
+hold 1,773 messages no other transcript has. They are branches from the same
+compaction point where work continued in more than one. Nothing is deleted;
+visibility alone is mirrored.
+
 ## [1.1.0] — 2026-08-28
 
 Moves the tool from transporting **one session** to migrating a **whole install**,
