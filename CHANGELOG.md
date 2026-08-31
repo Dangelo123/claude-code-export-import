@@ -5,6 +5,30 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-08-30
+
+### Fixed
+
+- **Nested transcripts kept the source machine's paths.** The rewrite ran over
+  the before/after diff of the destination project directory, which lists both
+  files and directories, and discarded anything not ending in `.jsonl`. The
+  session's sidecar is a directory, so every subagent and workflow transcript
+  inside it was skipped. Measured on the migration this was found in: 2774 of
+  2959 nested transcripts still referenced the Windows paths.
+
+  Resuming a session was never affected -- the cwd it resumes with lives in the
+  top-level transcript, which was rewritten -- which is why the whole existing
+  suite stayed green. What was wrong was the history inside the log.
+
+  Binary files that share the sidecar (PDFs, images from tool results) are now
+  skipped explicitly instead of raising.
+
+### Tests
+
+`test_rewrite_aninhado.py` builds a real sidecar tree (subagents/workflows plus
+a binary) and asserts the rewrite reaches the bottom of it, still never touches
+a pre-existing session, and is idempotent. It fails against the old code.
+
 ## [1.4.0] - 2026-08-29
 
 Pinned sessions actually arrive.

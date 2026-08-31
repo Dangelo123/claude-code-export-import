@@ -740,15 +740,19 @@ def ensure_retention(home, days=999999):
 
 def _deep_rewrite_files(dest_dir, names, rewrite):
     """
-    Apply the separator-aware rewrite to specific files only.
+    Apply the separator-aware rewrite to what this import just created.
 
     `names` comes from a before/after diff of the destination directory, so
     pre-existing sessions on the target machine are never read or rewritten.
+
+    A new entry is a FILE (the transcript) or a DIRECTORY -- the session's
+    sidecar, holding the subagent and workflow transcripts. Skipping anything
+    that did not end in .jsonl silently skipped those directories: measured on
+    a real migration, 2774 of 2959 nested transcripts kept the source machine's
+    paths. Resuming still worked (the cwd a session resumes with lives in the
+    top-level file) but the history inside the log was wrong.
     """
-    for fn in names:
-        if not fn.endswith('.jsonl'):
-            continue
-        p = os.path.join(dest_dir, fn)
+    def um(p, rotulo):
         try:
             with open(p, encoding='utf-8') as fh:
                 txt = fh.read()
@@ -756,8 +760,21 @@ def _deep_rewrite_files(dest_dir, names, rewrite):
             if new != txt:
                 with open(p, 'w', encoding='utf-8', newline='\n') as fh:
                     fh.write(new)
+        except UnicodeDecodeError:
+            pass          # binario no sidecar (pdf, jpg): nao ha o que reescrever
         except Exception as e:
-            print("[warn] rewrite failed on %s: %s" % (fn, e))
+            print("[warn] rewrite failed on %s: %s" % (rotulo, e))
+
+    for fn in names:
+        p = os.path.join(dest_dir, fn)
+        if os.path.isdir(p):
+            for raiz, _, arquivos in os.walk(p):
+                for a in arquivos:
+                    if a.endswith('.jsonl'):
+                        cheio = os.path.join(raiz, a)
+                        um(cheio, os.path.relpath(cheio, dest_dir))
+        elif fn.endswith('.jsonl'):
+            um(p, fn)
 
 
 # ---------------------------------------------------------------------- main
