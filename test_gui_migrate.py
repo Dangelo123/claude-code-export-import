@@ -60,10 +60,10 @@ def check(name, cond, detail=""):
 tmp = tempfile.mkdtemp(prefix='guimig_')
 try:
     app = gui.App(_root)
-    check("app constroi com a aba nova", app.tab_migrate is not None)
-    check("editor de mapa comeca vazio", app.map_entries == [])
+    check("app builds with the new tab", app.tab_migrate is not None)
+    check("the map editor starts empty", app.map_entries == [])
 
-    # bundle falso, como o export-all deixaria
+    # a fake bundle, shaped the way export-all would leave one
     bundle = os.path.join(tmp, 'bundle')
     os.makedirs(bundle)
     tmpl = {r"D:\Work\Alpha": "<FILL IN destination path>",

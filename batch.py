@@ -426,7 +426,7 @@ def export_extras(home, out_dir):
             if os.path.isfile(f):
                 z.write(f, arcname='home/' + fn)
                 n += 1
-    print("[ok] extras: %d arquivos -> %s" % (n, path))
+    print("[ok] extras: %d files -> %s" % (n, path))
     return n
 
 
@@ -755,7 +755,7 @@ def _deep_rewrite_files(dest_dir, names, rewrite):
     paths. Resuming still worked (the cwd a session resumes with lives in the
     top-level file) but the history inside the log was wrong.
     """
-    def um(p, rotulo):
+    def one(p, label):
         try:
             with open(p, encoding='utf-8') as fh:
                 txt = fh.read()
@@ -766,18 +766,18 @@ def _deep_rewrite_files(dest_dir, names, rewrite):
         except UnicodeDecodeError:
             pass          # binary in the sidecar (pdf, jpg): nothing to rewrite
         except Exception as e:
-            print("[warn] rewrite failed on %s: %s" % (rotulo, e))
+            print("[warn] rewrite failed on %s: %s" % (label, e))
 
     for fn in names:
         p = os.path.join(dest_dir, fn)
         if os.path.isdir(p):
-            for raiz, _, arquivos in os.walk(p):
-                for a in arquivos:
+            for root, _, files in os.walk(p):
+                for a in files:
                     if a.endswith('.jsonl'):
-                        cheio = os.path.join(raiz, a)
-                        um(cheio, os.path.relpath(cheio, dest_dir))
+                        full = os.path.join(root, a)
+                        one(full, os.path.relpath(full, dest_dir))
         elif fn.endswith('.jsonl'):
-            um(p, fn)
+            one(p, fn)
 
 
 # ---------------------------------------------------------------------- main
