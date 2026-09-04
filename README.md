@@ -194,10 +194,10 @@ that guard protected 2442 of 3154 transcripts.
 python test_batch.py         # path rewriters, both grammars
 python test_extras.py        # memories/CLAUDE.md transport
 python test_no_clobber.py    # importing never touches existing sessions
-python test_real_corpus.py   # dry-run over YOUR real transcripts (read-only)
+python check_corpus.py   # dry-run over YOUR real transcripts (read-only)
 
-python -m unittest test_modo_fiel test_localstorage_paths \
-                   test_titulo_visibilidade test_fresh_install
+python -m unittest test_faithful_mode test_localstorage_paths \
+                   test_title_visibility test_fresh_install
 ```
 
 The `unittest` modules cover what a real cross-OS migration broke: a fresh
@@ -205,7 +205,7 @@ install with no record to clone, titles falling back to the folder name,
 sessions the source never listed showing up at the destination, the paths
 buried in Local Storage, and the profile transport that carries pinning.
 
-`test_real_corpus.py` is the one worth running before you trust a migration: it
+`check_corpus.py` is the one worth running before you trust a migration: it
 replays the rewriter over every local transcript and asserts that every line
 that parsed as JSON before still parses after, and that no mapped Windows path
 survived.

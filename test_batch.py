@@ -108,10 +108,10 @@ if fails:
 print("all tests passed")
 
 # ---------------------------------------------------------------------------
-# rewriter de TEXTO PURO (.md/.txt) -- gramatica diferente do JSON.
-# Regressao: a primeira versao usava o rewriter JSON aqui e 105 arquivos de
-# memoria ficaram com caminhos Windows intactos.
-print("\nrewriter de texto plano (.md)\n")
+# PLAIN TEXT rewriter (.md/.txt) -- a different grammar from JSON.
+# Regression: the first version used the JSON rewriter here and 105 memory
+# files were left with their Windows paths intact.
+print("\nplain-text rewriter (.md)\n")
 
 prw = batch.build_plain_rewriter(MAP, to_posix=True)
 
@@ -125,29 +125,29 @@ def checkp(name, src, want):
         print("  %-42s ok" % name)
 
 
-checkp("caminho literal em markdown",
-       r"pasta local `D:\ClaudeCowork_MeepGreenfield`",
-       "pasta local `/home/fernando/cowork`")
+checkp("literal path in markdown",
+       r"local folder `D:\ClaudeCowork_MeepGreenfield`",
+       "local folder `/home/fernando/cowork`")
 
-checkp("subcaminho literal",
-       r"veja D:\ClaudeCowork_MeepGreenfield\src\Meep\Foo.cs agora",
-       "veja /home/fernando/cowork/src/Meep/Foo.cs agora")
+checkp("literal sub-path",
+       r"see D:\ClaudeCowork_MeepGreenfield\src\Meep\Foo.cs now",
+       "see /home/fernando/cowork/src/Meep/Foo.cs now")
 
-checkp("prefixo mais longo ganha",
+checkp("longest prefix wins",
        r"D:\ClaudeCowork_MeepGreenfield\.claude\worktrees\cranky-shannon-33fb8e",
        "/home/fernando/cowork/.claude/worktrees/cranky-shannon-33fb8e")
 
-checkp("caminho nao mapeado intacto",
-       r"o repo fica em E:\Outro\Lugar",
-       r"o repo fica em E:\Outro\Lugar")
+checkp("unmapped path left alone",
+       r"the repo lives in E:\Other\Place",
+       r"the repo lives in E:\Other\Place")
 
-checkp("segunda raiz",
+checkp("second root",
        r"- [PG](C:\temp\payment-gateway-gh\README.md) — hook",
        "- [PG](/home/fernando/pg/README.md) — hook")
 
-checkp("texto sem caminho nenhum",
-       r"nada de path aqui, so prosa com \n e regex \d+",
-       r"nada de path aqui, so prosa com \n e regex \d+")
+checkp("text with no path at all",
+       r"no path here, just prose with \n and a regex \d+",
+       r"no path here, just prose with \n and a regex \d+")
 
 print()
 if fails:

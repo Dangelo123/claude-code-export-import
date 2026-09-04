@@ -43,8 +43,8 @@ def build_plain_rewriter(mapping, to_posix):
     for old, new in pairs:
         for variant in sorted({old, old.replace('\\', '/')}):
             esc = re.escape(variant)
-            # cauda do caminho: barras normais/invertidas e caracteres comuns
-            # de nome de arquivo; para em espaco, aspas ou fim de linha
+            # the path's tail: slashes/backslashes and characters common in
+            # filenames; stops at a space, a quote or the end of the line
             tail = r'(?P<tail>(?:[\\/][^\s"\'<>|:*?\r\n]+)*)'
             rules.append((re.compile(esc + tail), new))
 
@@ -204,16 +204,16 @@ def do_import_all(args):
 
     home = csp.default_claude_home(args.claude_home)
 
-    # Modo fiel: em vez de sintetizar registros novos, restaura os originais e
-    # mantem os ids das sessoes. E o que faz o pinned sobreviver, porque
-    # pinnedOrder guarda o id local_<uuid> de cada registro, nao o da sessao.
-    fiel = args.faithful and os.path.isfile(os.path.join(src_dir, PROFILE_ZIP))
-    if args.faithful and not fiel:
-        print("[warn] --faithful pedido, mas o bundle nao tem " + PROFILE_ZIP
-              + " (exportado por uma versao antiga); seguindo no modo comum)")
-    if fiel:
-        print("[info] modo fiel: ids preservados; registros e barra lateral"
-              " vem da origem")
+    # Faithful mode: instead of synthesising new records, restore the originals
+    # and keep the session ids. That is what makes pinning survive, because
+    # pinnedOrder holds each record's local_<uuid> id, not the session's.
+    faithful = args.faithful and os.path.isfile(os.path.join(src_dir, PROFILE_ZIP))
+    if args.faithful and not faithful:
+        print("[warn] --faithful asked for, but the bundle has no " + PROFILE_ZIP
+              + " (exported by an older version); continuing in normal mode)")
+    if faithful:
+        print("[info] faithful mode: ids preserved; records and sidebar"
+              " come from the source")
     if not args.dry_run:
         ensure_retention(home, args.retention_days)
 
@@ -239,10 +239,10 @@ def do_import_all(args):
         # rewrite ourselves (keep_paths=True disables the naive one)
         ns = argparse.Namespace(
             src=bundle, target_cwd=target, claude_home=args.claude_home,
-            keep_id=args.keep_id or fiel,
+            keep_id=args.keep_id or faithful,
             keep_paths=True,
             git_branch=None, title_suffix=None, title=None,
-            app_store=args.app_store, no_app_index=args.no_app_index or fiel, index_all=args.index_all,
+            app_store=args.app_store, no_app_index=args.no_app_index or faithful, index_all=args.index_all,
             bump_version=False, no_sidecar=False, with_history=args.with_history,
             dry_run=False)
         # snapshot the destination so the deep rewrite only ever touches the
@@ -261,7 +261,7 @@ def do_import_all(args):
             print("   ... %d/%d" % (i, len(manifest)))
 
     if not args.dry_run:
-        # slug antigo -> slug novo, derivado do mesmo mapa de prefixos
+        # old slug -> new slug, derived from the same prefix map
         slug_map = {}
         for old_cwd in mapping:
             slug_map[csp.enc_project(old_cwd)] = csp.enc_project(mapping[old_cwd])
@@ -269,7 +269,7 @@ def do_import_all(args):
         def remap_slug(old_slug):
             if old_slug in slug_map:
                 return slug_map[old_slug]
-            # worktrees: o slug do filho comeca com o slug do pai
+            # worktrees: the child's slug starts with the parent's slug
             for o, n in sorted(slug_map.items(), key=lambda kv: -len(kv[0])):
                 if old_slug.startswith(o):
                     return n + old_slug[len(o):]
@@ -279,126 +279,127 @@ def do_import_all(args):
 
                       plain_rewrite=build_plain_rewriter(mapping, to_posix))
 
-        if fiel:
+        if faithful:
             import_app_profile(src_dir, remap, args.app_store, args.dry_run,
-                               mapa_bruto=mapping, para_posix=to_posix)
+                               raw_map=mapping, to_posix=to_posix)
 
-        restaurados = import_config(home, src_dir, rewrite, args.app_store,
-                                    args.dry_run)
-        if restaurados and not args.dry_run:
-            # settings.json da origem sobrescreveu o que ensure_retention criou;
-            # reaplica para nao voltar a podar transcript com mais de 30 dias
+        restored = import_config(home, src_dir, rewrite, args.app_store,
+                                 args.dry_run)
+        if restored and not args.dry_run:
+            # the source's settings.json overwrote what ensure_retention wrote;
+            # reapply it so transcripts older than 30 days are not pruned again
             ensure_retention(home, args.retention_days)
-            print("     >>> feche e reabra o app: o Local Storage so e relido"
-                  " na inicializacao")
+            print("     >>> close and reopen the app: Local Storage is only"
+                  " re-read at startup")
 
     print("\n[done] imported %d, failed/skipped %d" % (ok, fail))
 
 
 # ------------------------------------------------------------------- extras
-# Um transcript nao e tudo. Ao lado das sessoes vivem artefatos que o usuario
-# espera reencontrar do outro lado: as memorias por projeto e o CLAUDE.md
-# global. Eles nao sao referenciados pelo .jsonl, entao viajam a parte -- e
-# tambem precisam do rewrite de caminho, porque citam paths do Windows.
+# A transcript is not everything. Next to the sessions live artefacts the user
+# expects to find again on the other side: the per-project memories and the
+# global CLAUDE.md. Nothing in the .jsonl points at them, so they travel
+# separately -- and they need the path rewrite too, because they cite Windows
+# paths.
 EXTRAS_ZIP = '_extras.zip'
 PROJECT_EXTRA_DIRS = ('memory', 'plans')
 HOME_EXTRA_FILES = ('CLAUDE.md',)
 
 CONFIG_ZIP = '_config.zip'
-# ~/.claude.json guarda os servidores MCP e as permissoes por projeto; sem ele
-# a maquina nova comeca com as integracoes todas por reconfigurar
+# ~/.claude.json holds the MCP servers and the per-project permissions; without
+# it the new machine starts with every integration left to reconfigure
 CONFIG_HOME_FILES = ('.claude.json',)
 CONFIG_CLAUDE_FILES = ('settings.json', 'settings.local.json')
-# arquivos do perfil do app que sao do APARELHO, nao do usuario: levar um
-# token de sessao ou o registro de dispositivo para outra maquina nao ajuda e
-# espalha credencial
+# app profile files that belong to the DEVICE, not to the user: carrying a
+# session token or the device registration to another machine does not help and
+# spreads credentials around
 CONFIG_PROFILE_SKIP = ('buddy-tokens.json', 'ant-device-registry.json')
 
 
-def _tem_credencial(texto):
-    """Heuristica: o arquivo carrega segredo que vai viajar no bundle?"""
+def _has_credential(text):
+    """Heuristic: does this file carry a secret that would travel in the bundle?"""
     return bool(re.search(r'"[^"]*(secret|token|password|api_?key)[^"]*"\s*:\s*"[^"]{8,}"',
-                          texto, re.I))
+                          text, re.I))
 
 
 def export_config(home, out_dir, app_store=None):
     """
-    Leva a configuracao: servidores MCP, permissoes, ajustes do app.
+    Carry the configuration: MCP servers, permissions, app settings.
 
-    Fica fora do fluxo normal (--with-config) porque estes arquivos costumam
-    guardar credencial de verdade -- variaveis de ambiente de servidor MCP,
-    por exemplo -- e o bundle acaba num disco externo. Quem pede, e avisado do
-    que vai junto.
+    This stays off the normal path (--with-config) because these files often
+    hold real credentials -- MCP server environment variables, for one -- and
+    the bundle tends to end up on an external disk. Whoever asks for it is told
+    what travelled along.
     """
     import zipfile
     path = os.path.join(out_dir, CONFIG_ZIP)
-    lar = os.path.expanduser('~')
+    home_dir = os.path.expanduser('~')
     prof = csp.app_profile_dir(app_store)
-    com_segredo, n = [], 0
+    with_secret, n = [], 0
 
-    def guarda(z, origem, arcname):
+    def store(z, source, arcname):
         nonlocal n
-        if not os.path.isfile(origem):
+        if not os.path.isfile(source):
             return
-        z.write(origem, arcname=arcname)
+        z.write(source, arcname=arcname)
         n += 1
         try:
-            if _tem_credencial(open(origem, encoding='utf-8', errors='ignore').read()):
-                com_segredo.append(arcname)
+            if _has_credential(open(source, encoding='utf-8', errors='ignore').read()):
+                with_secret.append(arcname)
         except Exception:
             pass
 
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
         for fn in CONFIG_HOME_FILES:
-            guarda(z, os.path.join(lar, fn), 'home/' + fn)
+            store(z, os.path.join(home_dir, fn), 'home/' + fn)
         for fn in CONFIG_CLAUDE_FILES:
-            guarda(z, os.path.join(home, fn), 'claude/' + fn)
+            store(z, os.path.join(home, fn), 'claude/' + fn)
         if prof and os.path.isdir(prof):
             for fn in sorted(os.listdir(prof)):
                 if not fn.endswith('.json') or fn in CONFIG_PROFILE_SKIP:
                     continue
-                guarda(z, os.path.join(prof, fn), 'profile/' + fn)
+                store(z, os.path.join(prof, fn), 'profile/' + fn)
 
-    print("[ok] config: %d arquivos -> %s" % (n, path))
-    if com_segredo:
-        print("[!!] estes carregam credencial e viajam no bundle:")
-        for a in com_segredo:
+    print("[ok] config: %d files -> %s" % (n, path))
+    if with_secret:
+        print("[!!] these carry credentials and travel in the bundle:")
+        for a in with_secret:
             print("        " + a)
     return n
 
 
 def import_config(home, src_dir, rewrite, app_store=None, dry=False):
-    """Restaura a configuracao, reescrevendo os caminhos que ela guarda."""
+    """Restore the configuration, rewriting the paths it holds."""
     import zipfile
     path = os.path.join(src_dir, CONFIG_ZIP)
     if not os.path.isfile(path):
         return 0
-    lar = os.path.expanduser('~')
+    home_dir = os.path.expanduser('~')
     prof = csp.app_profile_dir(app_store)
     n = 0
     with zipfile.ZipFile(path) as z:
-        for nome in z.namelist():
-            if nome.startswith('home/'):
-                dest = os.path.join(lar, nome[len('home/'):])
-            elif nome.startswith('claude/'):
-                dest = os.path.join(home, nome[len('claude/'):])
-            elif nome.startswith('profile/') and prof:
-                dest = os.path.join(prof, nome[len('profile/'):])
+        for name in z.namelist():
+            if name.startswith('home/'):
+                dest = os.path.join(home_dir, name[len('home/'):])
+            elif name.startswith('claude/'):
+                dest = os.path.join(home, name[len('claude/'):])
+            elif name.startswith('profile/') and prof:
+                dest = os.path.join(prof, name[len('profile/'):])
             else:
                 continue
-            dados = z.read(nome)
+            data = z.read(name)
             try:
-                # sao .json: o caminho aparece escapado, inclusive nas CHAVES
-                # de "projects" -- reescrever o texto inteiro cobre os dois
-                dados = rewrite(dados.decode('utf-8')).encode('utf-8')
+                # these are .json: the path shows up escaped, including in the
+                # KEYS of "projects" -- rewriting the whole text covers both
+                data = rewrite(data.decode('utf-8')).encode('utf-8')
             except UnicodeDecodeError:
                 pass
             if not dry:
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with open(dest, 'wb') as fh:
-                    fh.write(dados)
+                    fh.write(data)
             n += 1
-    print("[ok] config: %d arquivos restaurados" % n)
+    print("[ok] config: %d files restored" % n)
     return n
 
 
@@ -432,30 +433,30 @@ def export_extras(home, out_dir):
 PROFILE_ZIP = '_app-profile.zip'
 
 
-def _pular_no_leveldb(nome):
+def _skip_in_leveldb(name):
     """
-    LOCK nao viaja.
+    LOCK does not travel.
 
-    E um arquivo vazio que o proprio leveldb cria, e no Windows o app o mantem
-    aberto com acesso exclusivo. Tentar zipa-lo falha na leitura -- mas
-    ZipFile.write ja escreveu o cabecalho da entrada, entao sobrava no pacote
-    uma entrada vazia que ninguem conseguia ler e que a contagem nao via.
+    It is an empty file leveldb creates for itself, and on Windows the app keeps
+    it open with exclusive access. Trying to zip it fails on the read -- but
+    ZipFile.write has already written the entry header by then, so the package
+    was left with an empty entry nobody could read and the count never saw.
     """
-    return nome == 'LOCK'
+    return name == 'LOCK'
 
 
 def export_app_profile(out_dir, app_store=None):
     """
-    Leva o perfil do app: os registros local_*.json, o Local Storage e o
+    Carry the app profile: the local_*.json records, Local Storage and
     IndexedDB.
 
-    Recriar os registros do zero perde o que so existe neles, e os dois
-    armazens do navegador se dividem o estado da barra lateral: o Local
-    Storage guarda ordem, largura e agrupamento; o IndexedDB guarda o indice
-    de sessoes que a interface de fato le -- inclusive quais estao fixadas.
-    Sem o IndexedDB, 32 sessoes ficam marcadas em disco e a barra lateral
-    mostra "Pinned" vazio (medido). Todos apontam para o id 'local_<uuid>' do
-    registro, entao a importacao precisa preservar os ids (--keep-id).
+    Rebuilding the records from scratch loses what only exists in them, and the
+    two browser stores split the sidebar's state between them: Local Storage
+    holds order, width and grouping; IndexedDB holds the session index the
+    interface actually reads -- including which ones are pinned. Without
+    IndexedDB, 32 sessions stay flagged on disk and the sidebar shows an empty
+    "Pinned" (measured). All of them point at the record's 'local_<uuid>' id, so
+    the import has to preserve the ids (--keep-id).
     """
     import zipfile
     base, _, _ = csp.find_record_dir(app_store)
@@ -463,7 +464,7 @@ def export_app_profile(out_dir, app_store=None):
         bases = csp.candidate_app_store_bases(app_store)
         base = bases[0] if bases else None
     if not base or not os.path.isdir(base):
-        print("[warn] app profile: nenhuma pasta claude-code-sessions encontrada")
+        print("[warn] app profile: no claude-code-sessions folder found")
         return 0
 
     ls = csp.local_storage_dir(app_store)
@@ -479,99 +480,100 @@ def export_app_profile(out_dir, app_store=None):
                 rel = os.path.relpath(full, base).replace(chr(92), '/')
                 z.write(full, arcname='records/' + rel)
                 n_rec += 1
-                conta = rel.split('/')[0]
-                if conta not in info["accounts"]:
-                    info["accounts"].append(conta)
+                account = rel.split('/')[0]
+                if account not in info["accounts"]:
+                    info["accounts"].append(account)
         if ls:
             for fn in sorted(os.listdir(ls)):
                 full = os.path.join(ls, fn)
-                if not os.path.isfile(full) or _pular_no_leveldb(fn):
+                if not os.path.isfile(full) or _skip_in_leveldb(fn):
                     continue
                 z.write(full, arcname='local-storage/' + fn)
                 n_ls += 1
         for idb in csp.indexeddb_dirs(app_store):
-            origem = os.path.basename(idb)
+            origin = os.path.basename(idb)
             for fn in sorted(os.listdir(idb)):
                 full = os.path.join(idb, fn)
-                if not os.path.isfile(full) or _pular_no_leveldb(fn):
+                if not os.path.isfile(full) or _skip_in_leveldb(fn):
                     continue
-                z.write(full, arcname='indexeddb/%s/%s' % (origem, fn))
+                z.write(full, arcname='indexeddb/%s/%s' % (origin, fn))
                 n_idb += 1
         info["records"] = n_rec
         info["localStorage"] = n_ls
         info["indexedDB"] = n_idb
         z.writestr('profile.json', json.dumps(info, ensure_ascii=False, indent=2))
-    print("[ok] perfil do app: %d registros, %d de Local Storage, %d de IndexedDB -> %s"
+    print("[ok] app profile: %d records, %d from Local Storage, %d from IndexedDB -> %s"
           % (n_rec, n_ls, n_idb, path))
     return n_rec
 
 
-def _reescrever_local_storage(ls_dir, mapa, para_posix):
+def _rewrite_local_storage(ls_dir, path_map, to_posix):
     """
-    Corrige os caminhos dentro do LevelDB copiado.
+    Fix the paths inside the copied LevelDB.
 
-    Precisa ler o banco de verdade -- os valores ficam em blocos comprimidos
-    com snappy, entao mexer nos bytes nao serve --, e para isso depende de
-    plyvel. Sem ele o Local Storage ainda vale a pena: o pinned atravessa. So
-    os caminhos e que ficam como estavam, e o aviso diz como resolver.
+    This has to read the database for real -- the values sit in snappy-compressed
+    blocks, so poking at the bytes does not reach them -- and for that it depends
+    on plyvel. Without it Local Storage is still worth copying: pinning survives.
+    Only the paths stay as they were, and the warning says how to fix them.
     """
     try:
         import localstorage_paths as lsp
     except Exception:
         return
-    if not lsp.disponivel():
-        print("[warn] plyvel ausente: o Local Storage foi copiado (o pinned")
-        print("       atravessa), mas os caminhos guardados nele continuam")
-        print("       apontando para a maquina de origem. Para corrigir:")
-        print("         pacman -S python-plyvel   (ou apt install python3-plyvel)")
+    if not lsp.available():
+        print("[warn] plyvel missing: Local Storage was copied (pinning")
+        print("       survives), but the paths stored in it still point")
+        print("       at the source machine. To fix:")
+        print("         pacman -S python-plyvel   (or apt install python3-plyvel)")
         print("         python3 localstorage_paths.py --leveldb '%s' --path-map ..."
               % ls_dir)
         return
     try:
-        n, k, _ = lsp.reescrever(ls_dir, mapa, para_posix)
-        print("[ok] Local Storage: %d chaves, %d com caminho reescrito" % (n, k))
+        n, k, _ = lsp.rewrite_db(ls_dir, path_map, to_posix)
+        print("[ok] Local Storage: %d keys, %d with the path rewritten" % (n, k))
     except Exception as e:
-        print("[warn] nao consegui reescrever os caminhos do Local Storage: %s" % e)
+        print("[warn] could not rewrite the Local Storage paths: %s" % e)
 
 
-def _preparar_leveldb(destino):
+def _prepare_leveldb(dest):
     """
-    Guarda uma copia do LevelDB do destino e esvazia a pasta.
+    Keep a copy of the destination's LevelDB and empty the folder.
 
-    A copia porque a substituicao e total: se o app guardar ali algo cifrado
-    pelo cofre do sistema (DPAPI no Windows, keyring no Linux), o valor vindo
-    de outra maquina nao decifra. Esvaziar porque misturar arquivos dos dois
-    lados deixa .ldb orfaos e um CURRENT apontando para o MANIFEST do outro
-    conjunto -- o destino tem de ficar com exatamente os arquivos da origem.
+    The copy because the replacement is total: if the app stored anything there
+    encrypted by the system vault (DPAPI on Windows, keyring on Linux), a value
+    coming from another machine will not decrypt. The emptying because mixing
+    files from both sides leaves orphan .ldb files and a CURRENT pointing at the
+    other set's MANIFEST -- the destination has to end up with exactly the
+    source's files.
     """
-    if not os.path.isdir(destino):
-        os.makedirs(destino, exist_ok=True)
+    if not os.path.isdir(dest):
+        os.makedirs(dest, exist_ok=True)
         return
-    bak = destino + '.antes-do-import'
+    bak = dest + '.before-import'
     if not os.path.isdir(bak):
         import shutil
-        shutil.copytree(destino, bak, ignore_dangling_symlinks=True)
-        print("[ok] copia do destino em %s" % bak)
-    for fn in os.listdir(destino):
-        alvo = os.path.join(destino, fn)
-        if os.path.isfile(alvo):
+        shutil.copytree(dest, bak, ignore_dangling_symlinks=True)
+        print("[ok] copy of the destination at %s" % bak)
+    for fn in os.listdir(dest):
+        target = os.path.join(dest, fn)
+        if os.path.isfile(target):
             try:
-                os.remove(alvo)
+                os.remove(target)
             except OSError:
                 pass
 
 
 def import_app_profile(src_dir, remap, app_store=None, dry=False,
-                       mapa_bruto=None, para_posix=True):
+                       raw_map=None, to_posix=True):
     """
-    Restaura os registros com o cwd reescrito e os dois armazens do navegador.
+    Restore the records with the cwd rewritten, plus both browser stores.
 
-    Os ids nao mudam -- e isso que faz o pinned continuar valendo. Os LevelDB
-    vao arquivo a arquivo; no Local Storage os caminhos sao reescritos depois
-    (ver _reescrever_local_storage). No IndexedDB nao sao: os valores usam a
-    serializacao do Blink, com strings prefixadas pelo tamanho, e trocar um
-    caminho por outro de tamanho diferente corromperia o registro. Os caminhos
-    que a sessao realmente usa vem do local_*.json, que e reescrito.
+    The ids do not change -- that is what keeps pinning valid. The LevelDBs go
+    file by file; in Local Storage the paths are rewritten afterwards (see
+    _rewrite_local_storage). In IndexedDB they are not: the values use Blink's
+    serialisation, with length-prefixed strings, and swapping one path for
+    another of a different length would corrupt the record. The paths a session
+    actually uses come from the local_*.json, which is rewritten.
     """
     import zipfile
     src = os.path.join(src_dir, PROFILE_ZIP)
@@ -581,82 +583,83 @@ def import_app_profile(src_dir, remap, app_store=None, dry=False,
     bases = csp.candidate_app_store_bases(app_store)
     base = next((b for b in bases if os.path.isdir(b)), None)
     if not base:
-        print("[warn] perfil do app: destino sem claude-code-sessions; "
-              "abra o app e faca login antes")
+        print("[warn] app profile: destination has no claude-code-sessions; "
+              "open the app and sign in first")
         return 0, 0
     ls_dest = os.path.join(csp.app_profile_dir(app_store), 'Local Storage', 'leveldb')
 
     if not dry:
-        _preparar_leveldb(ls_dest)
+        _prepare_leveldb(ls_dest)
 
     n_rec = n_ls = n_idb = 0
-    idb_raiz = os.path.join(csp.app_profile_dir(app_store), 'IndexedDB')
-    idb_prontos = set()
-    ilegiveis = []
+    idb_root = os.path.join(csp.app_profile_dir(app_store), 'IndexedDB')
+    idb_ready = set()
+    unreadable = []
     with zipfile.ZipFile(src) as z:
-        for nome in z.namelist():
-            if nome.startswith('records/') and nome.endswith('.json'):
-                bruto = z.read(nome)
+        for name in z.namelist():
+            if name.startswith('records/') and name.endswith('.json'):
+                raw = z.read(name)
                 try:
-                    o = json.loads(bruto.decode('utf-8'))
+                    o = json.loads(raw.decode('utf-8'))
                 except Exception:
-                    # Registro ilegivel ja na origem: um desligamento sujo
-                    # deixa o arquivo com o tamanho certo e so zeros dentro.
-                    # Copiar como esta mantem o espelho fiel (nao ha caminho a
-                    # reescrever) -- mas vale avisar, porque pode ser uma
-                    # sessao fixada que tambem nao abre na maquina de origem.
-                    ilegiveis.append(os.path.basename(nome))
+                    # Record already unreadable at the source: an unclean
+                    # shutdown leaves the file at the right size and full of
+                    # zeros. Copying it as-is keeps the mirror faithful (there
+                    # is no path to rewrite) -- but it is worth warning about,
+                    # because it may be a pinned session that does not open on
+                    # the source machine either.
+                    unreadable.append(os.path.basename(name))
                     if not dry:
-                        dest = os.path.join(base, *nome[len('records/'):].split('/'))
+                        dest = os.path.join(base, *name[len('records/'):].split('/'))
                         os.makedirs(os.path.dirname(dest), exist_ok=True)
                         with open(dest, 'wb') as fh:
-                            fh.write(bruto)
+                            fh.write(raw)
                     n_rec += 1
                     continue
-                for campo in ('cwd', 'originCwd', 'worktreePath', 'planPath'):
-                    v = o.get(campo)
+                for field in ('cwd', 'originCwd', 'worktreePath', 'planPath'):
+                    v = o.get(field)
                     if isinstance(v, str) and v:
-                        novo_v = remap(v)
-                        if novo_v:
-                            o[campo] = novo_v
-                dest = os.path.join(base, *nome[len('records/'):].split('/'))
+                        new_v = remap(v)
+                        if new_v:
+                            o[field] = new_v
+                dest = os.path.join(base, *name[len('records/'):].split('/'))
                 if not dry:
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
                     with open(dest, 'w', encoding='utf-8', newline=chr(10)) as fh:
                         json.dump(o, fh, ensure_ascii=False, indent=2)
                 n_rec += 1
-            elif nome.startswith('local-storage/') and not nome.endswith('/'):
+            elif name.startswith('local-storage/') and not name.endswith('/'):
                 if not dry:
                     os.makedirs(ls_dest, exist_ok=True)
-                    with open(os.path.join(ls_dest, os.path.basename(nome)), 'wb') as fh:
-                        fh.write(z.read(nome))
+                    with open(os.path.join(ls_dest, os.path.basename(name)), 'wb') as fh:
+                        fh.write(z.read(name))
                 n_ls += 1
-            elif nome.startswith('indexeddb/') and not nome.endswith('/'):
-                partes = nome.split('/')
-                if len(partes) != 3:
+            elif name.startswith('indexeddb/') and not name.endswith('/'):
+                parts = name.split('/')
+                if len(parts) != 3:
                     continue
-                origem, fn = partes[1], partes[2]
-                destino = os.path.join(idb_raiz, origem)
-                if not dry and destino not in idb_prontos:
-                    _preparar_leveldb(destino)
-                    idb_prontos.add(destino)
+                origin, fn = parts[1], parts[2]
+                dest_dir = os.path.join(idb_root, origin)
+                if not dry and dest_dir not in idb_ready:
+                    _prepare_leveldb(dest_dir)
+                    idb_ready.add(dest_dir)
                 if not dry:
-                    with open(os.path.join(destino, fn), 'wb') as fh:
-                        fh.write(z.read(nome))
+                    with open(os.path.join(dest_dir, fn), 'wb') as fh:
+                        fh.write(z.read(name))
                 n_idb += 1
 
-    # O Local Storage tambem guarda caminho de arquivo: uma chave
-    # cc-session-cwd-* por sessao e blobs JSON com o agrupamento por pasta.
-    # Copiado cru, o app pede para confiar num caminho que nao existe aqui.
+    # Local Storage holds file paths too: one cc-session-cwd-* key per session
+    # plus JSON blobs with the folder grouping. Copied raw, the app asks you to
+    # trust a path that does not exist here.
     if n_ls and not dry:
-        _reescrever_local_storage(ls_dest, mapa_bruto, para_posix)
+        _rewrite_local_storage(ls_dest, raw_map, to_posix)
 
-    print("[ok] perfil do app: %d registros, %d de Local Storage, %d de IndexedDB"
+    print("[ok] app profile: %d records, %d from Local Storage, %d from IndexedDB"
           % (n_rec, n_ls, n_idb))
-    if ilegiveis:
-        print("[warn] %d registro(s) ilegiveis na origem, copiados como estao:"
-              % len(ilegiveis))
-        for fn in ilegiveis[:5]:
+    if unreadable:
+        print("[warn] %d record(s) unreadable at the source, copied as-is:"
+              % len(unreadable))
+        for fn in unreadable[:5]:
             print("        " + fn)
     return n_rec, n_ls
 
@@ -696,9 +699,9 @@ def import_extras(home, src_dir, rewrite, remap_slug, plain_rewrite=None):
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             data = z.read(info)
             low = dest.lower()
-            # .jsonl/.json carregam o caminho JSON-escapado; .md/.txt o carregam
-            # literal -- sao gramaticas diferentes e precisam de rewriters
-            # diferentes, senao o padrao nunca casa no markdown.
+            # .jsonl/.json carry the path JSON-escaped; .md/.txt carry it
+            # literal -- different grammars, so they need different rewriters,
+            # otherwise the pattern never matches in the markdown.
             fn_rw = rewrite if low.endswith(('.json', '.jsonl')) else (plain_rewrite or rewrite)
             if low.endswith(('.md', '.json', '.txt', '.jsonl')):
                 try:
@@ -761,7 +764,7 @@ def _deep_rewrite_files(dest_dir, names, rewrite):
                 with open(p, 'w', encoding='utf-8', newline='\n') as fh:
                     fh.write(new)
         except UnicodeDecodeError:
-            pass          # binario no sidecar (pdf, jpg): nao ha o que reescrever
+            pass          # binary in the sidecar (pdf, jpg): nothing to rewrite
         except Exception as e:
             print("[warn] rewrite failed on %s: %s" % (rotulo, e))
 
@@ -805,12 +808,12 @@ def main():
     pi.add_argument('--keep-id', action='store_true')
     pi.add_argument('--no-app-index', action='store_true')
     pi.add_argument('--faithful', action='store_true',
-                    help='reproduz a barra lateral da origem: mantem os ids,'
-                         ' restaura os registros originais e o estado de'
-                         ' sessoes fixadas (exige o app fechado no destino)')
+                    help='reproduce the source sidebar: keep the ids, restore'
+                         ' the original records and the pinned state (needs the'
+                         ' app closed on the destination)')
     pi.add_argument('--index-all', action='store_true',
-                    help='cria registro tambem para sessoes que nao'
-                         ' apareciam na interface da origem')
+                    help='also create a record for sessions that did not show'
+                         ' up in the source interface')
     pi.add_argument('--with-history', action='store_true')
     pi.add_argument('--retention-days', type=int, default=999999,
                     help='cleanupPeriodDays to write before importing '

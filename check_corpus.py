@@ -4,7 +4,7 @@ Safety check: run the rewriter over the REAL local transcripts and assert that
 every line still parses as JSON afterwards, and that no Windows path from the
 mapped roots survives. Read-only -- nothing is written.
 
-Usage:  python test_real_corpus.py [--limit N]
+Usage:  python check_corpus.py [--limit N]
 """
 import argparse
 import json

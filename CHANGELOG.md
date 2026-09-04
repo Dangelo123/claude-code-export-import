@@ -5,6 +5,46 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-04
+
+The repository was written while migrating one real install, and the parts
+nobody else was meant to read stayed in Portuguese. This release finishes the
+job of making it legible to someone who did not write it.
+
+### Changed
+
+- **Everything is in English now**: user-facing messages, comments, docstrings,
+  internal identifiers and test names. The documentation already was.
+
+- **Five files renamed.** Anything calling these directly needs updating:
+
+  | before | after |
+  | --- | --- |
+  | `arquivar_mortas.py` | `archive_orphans.py` |
+  | `test_modo_fiel.py` | `test_faithful_mode.py` |
+  | `test_rewrite_aninhado.py` | `test_nested_rewrite.py` |
+  | `test_titulo_visibilidade.py` | `test_title_visibility.py` |
+  | `test_real_corpus.py` | `check_corpus.py` |
+
+  That last one is not a rename for language: `check_corpus.py` is a diagnostic
+  script that takes arguments, not a test. Named `test_*` it was collected by
+  `unittest discover`, run with no arguments, and reported a false failure.
+
+- **Renamed in the module API**, so external callers break loudly rather than
+  silently: `localstorage_paths.disponivel` -> `available`,
+  `construir_reescritor` -> `build_rewriter`, `reescrever` -> `rewrite_db`.
+
+- **The backup directory faithful mode leaves behind** is now `.before-import`
+  instead of `.antes-do-import`.
+
+### Fixed
+
+- **`python -m unittest discover` exited 1 on a clean checkout.** Two causes,
+  both fixed: `test_real_corpus.py` was not a test (renamed, above), and
+  `test_gui_migrate.py` skipped by calling `sys.exit(0)` at import time, which
+  surfaces as an ImportError under discover. It now raises `unittest.SkipTest`
+  when imported and still prints-and-exits when run as a script.
+
 ## [1.4.1] - 2026-08-30
 
 ### Fixed

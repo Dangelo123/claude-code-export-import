@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-O Local Storage do app guarda caminho de arquivo -- uma chave
-`cc-session-cwd-local_<id>` por sessao e blobs JSON com caminhos escapados.
-Copiado cru de um Windows para um Linux, o app pede para confiar em
-`D:\\Projeto`, que nao existe ali. Estes casos travam a reescrita.
+The app's Local Storage holds file paths -- one `cc-session-cwd-local_<id>` key
+per session, plus JSON blobs with escaped paths. Copied raw from a Windows
+machine to a Linux one, the app asks you to trust `D:\\Project`, which does not
+exist there. These cases pin the rewrite down.
 """
 import unittest
 
 import localstorage_paths as lp
 
 BS = chr(92)
-MAPA = {
+PATH_MAP = {
     'D:' + BS + 'ClaudeCowork_MeepGreenfield': '/home/f/ClaudeCowork_MeepGreenfield',
     'C:' + BS + 'Users' + BS + 'LocalAdmin' + BS + 'Documents' + BS + 'GTD_Project':
         '/home/f/GTD_Project',
@@ -18,66 +18,66 @@ MAPA = {
 }
 
 
-class Reescritor(unittest.TestCase):
+class Rewriter(unittest.TestCase):
     def setUp(self):
-        self.r = lp.construir_reescritor(MAPA, True)
+        self.r = lp.build_rewriter(PATH_MAP, True)
 
-    def test_caminho_cru(self):
+    def test_raw_path(self):
         self.assertEqual(self.r('D:' + BS + 'ClaudeCowork_MeepGreenfield'),
                          '/home/f/ClaudeCowork_MeepGreenfield')
 
-    def test_cauda_troca_de_separador(self):
+    def test_tail_switches_separator(self):
         self.assertEqual(
             self.r('D:' + BS + 'ClaudeCowork_MeepGreenfield' + BS + 'src' + BS + 'A.cs'),
             '/home/f/ClaudeCowork_MeepGreenfield/src/A.cs')
 
-    def test_caminho_escapado_em_json(self):
-        entrada = '{"pasta":"D:' + BS * 2 + 'ClaudeCowork_MeepGreenfield' + BS * 2 + 'sub"}'
-        self.assertEqual(self.r(entrada),
-                         '{"pasta":"/home/f/ClaudeCowork_MeepGreenfield/sub"}')
+    def test_path_escaped_in_json(self):
+        given = '{"folder":"D:' + BS * 2 + 'ClaudeCowork_MeepGreenfield' + BS * 2 + 'sub"}'
+        self.assertEqual(self.r(given),
+                         '{"folder":"/home/f/ClaudeCowork_MeepGreenfield/sub"}')
 
-    def test_barra_normal_tambem_casa(self):
+    def test_forward_slash_matches_too(self):
         self.assertEqual(self.r('D:/ClaudeCowork_MeepGreenfield'),
                          '/home/f/ClaudeCowork_MeepGreenfield')
 
-    def test_prefixo_mais_longo_vence(self):
-        # C:\Users\LocalAdmin tambem casa, mas GTD_Project e mais especifico
-        alvo = 'C:' + BS + 'Users' + BS + 'LocalAdmin' + BS + 'Documents' + BS + 'GTD_Project'
-        self.assertEqual(self.r(alvo), '/home/f/GTD_Project')
+    def test_longest_prefix_wins(self):
+        # C:\Users\LocalAdmin matches too, but GTD_Project is more specific
+        target = 'C:' + BS + 'Users' + BS + 'LocalAdmin' + BS + 'Documents' + BS + 'GTD_Project'
+        self.assertEqual(self.r(target), '/home/f/GTD_Project')
 
-    def test_caminho_fora_do_mapa_fica_intacto(self):
-        self.assertEqual(self.r('E:' + BS + 'outro' + BS + 'coisa'),
-                         'E:' + BS + 'outro' + BS + 'coisa')
+    def test_path_outside_the_map_is_left_alone(self):
+        self.assertEqual(self.r('E:' + BS + 'other' + BS + 'thing'),
+                         'E:' + BS + 'other' + BS + 'thing')
 
-    def test_texto_sem_caminho(self):
+    def test_text_without_a_path(self):
         self.assertEqual(self.r('{"pinnedOrder":["local_a","local_b"]}'),
                          '{"pinnedOrder":["local_a","local_b"]}')
 
-    def test_nao_estraga_barra_que_nao_e_caminho(self):
-        # a barra invertida aqui pertence a um escape, nao a um caminho
-        entrada = '{"re":"' + BS * 2 + 'd+","p":"D:' + BS * 2 + 'ClaudeCowork_MeepGreenfield"}'
-        saida = self.r(entrada)
-        self.assertIn(BS * 2 + 'd+', saida)
-        self.assertIn('/home/f/ClaudeCowork_MeepGreenfield', saida)
+    def test_does_not_break_a_backslash_that_is_not_a_path(self):
+        # the backslash here belongs to an escape sequence, not to a path
+        given = '{"re":"' + BS * 2 + 'd+","p":"D:' + BS * 2 + 'ClaudeCowork_MeepGreenfield"}'
+        out = self.r(given)
+        self.assertIn(BS * 2 + 'd+', out)
+        self.assertIn('/home/f/ClaudeCowork_MeepGreenfield', out)
 
 
-class Codificacao(unittest.TestCase):
-    def test_latin1_ida_e_volta(self):
-        b = lp._codifica('C:' + BS + 'x', lp.LATIN1)
+class Encoding(unittest.TestCase):
+    def test_latin1_round_trip(self):
+        b = lp._encode('C:' + BS + 'x', lp.LATIN1)
         self.assertEqual(b[0], lp.LATIN1)
-        self.assertEqual(lp._decodifica(b), ('C:' + BS + 'x', lp.LATIN1))
+        self.assertEqual(lp._decode(b), ('C:' + BS + 'x', lp.LATIN1))
 
-    def test_utf16_ida_e_volta(self):
-        b = lp._codifica('sessao ' + chr(231), lp.UTF16)
+    def test_utf16_round_trip(self):
+        b = lp._encode('session ' + chr(231), lp.UTF16)
         self.assertEqual(b[0], lp.UTF16)
-        self.assertEqual(lp._decodifica(b), ('sessao ' + chr(231), lp.UTF16))
+        self.assertEqual(lp._decode(b), ('session ' + chr(231), lp.UTF16))
 
-    def test_valor_vazio(self):
-        self.assertEqual(lp._decodifica(b''), (None, None))
+    def test_empty_value(self):
+        self.assertEqual(lp._decode(b''), (None, None))
 
-    def test_valor_binario_e_ignorado(self):
-        texto, _ = lp._decodifica(bytes([9, 200, 201, 202]))
-        self.assertIsNone(texto)
+    def test_binary_value_is_ignored(self):
+        text, _ = lp._decode(bytes([9, 200, 201, 202]))
+        self.assertIsNone(text)
 
 
 if __name__ == '__main__':

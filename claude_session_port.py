@@ -89,16 +89,16 @@ def candidate_app_store_bases(explicit=None):
         bases.append(os.path.expanduser('~/Library/Application Support/Claude/claude-code-sessions'))
     else:
         bases.append(os.path.expanduser('~/.config/Claude/claude-code-sessions'))
-    # No Windows com a versao da Store, %APPDATA%\Claude e uma junction para
-    # o LocalCache do pacote: as duas bases sao a MESMA pasta, e sem isto todo
-    # registro e lido e contado duas vezes.
-    unicas, vistos = [], set()
+    # On Windows with the Store build, %APPDATA%\Claude is a junction into the
+    # package's LocalCache: both bases are the SAME folder, and without this
+    # every record is read and counted twice.
+    unique, seen = [], set()
     for b in bases:
-        chave = os.path.normcase(os.path.realpath(b))
-        if chave not in vistos:
-            vistos.add(chave)
-            unicas.append(b)
-    return unicas
+        key = os.path.normcase(os.path.realpath(b))
+        if key not in seen:
+            seen.add(key)
+            unique.append(b)
+    return unique
 
 def find_record_by_cli(cli_id, explicit=None):
     """Find the app record (local_*.json) whose cliSessionId == cli_id, in any base."""
@@ -152,11 +152,11 @@ def find_account_dir(explicit=None):
 
 
 def app_profile_dir(explicit=None):
-    """Pasta do perfil do Claude Desktop (a mae de claude-code-sessions).
+    """Claude Desktop's profile folder (the parent of claude-code-sessions).
 
-    E onde vivem os dois armazens do navegador que a barra lateral usa: o
-    Local Storage (largura, ordem, agrupamento) e o IndexedDB (o indice de
-    sessoes, inclusive quais estao fixadas)."""
+    This is where the two browser stores the sidebar relies on live: Local
+    Storage (width, order, grouping) and IndexedDB (the session index, including
+    which ones are pinned)."""
     for base in candidate_app_store_bases(explicit):
         if os.path.isdir(base):
             return os.path.dirname(base)
@@ -165,7 +165,7 @@ def app_profile_dir(explicit=None):
 
 
 def local_storage_dir(explicit=None):
-    """<perfil>/Local Storage/leveldb, ou None se ainda nao existir."""
+    """<profile>/Local Storage/leveldb, or None if it does not exist yet."""
     prof = app_profile_dir(explicit)
     if not prof:
         return None
@@ -175,19 +175,19 @@ def local_storage_dir(explicit=None):
 
 def indexeddb_dirs(explicit=None):
     """
-    Pastas de IndexedDB do app, uma por origem.
+    The app's IndexedDB folders, one per origin.
 
-    E aqui que mora o indice de sessoes que a interface le, incluindo quais
-    estao fixadas. Os local_*.json sao um espelho: restaurar so eles deixa 33
-    sessoes marcadas em disco e a barra lateral mostrando uma.
+    This is where the session index the interface reads lives, including which
+    ones are pinned. The local_*.json files are a mirror: restoring only those
+    leaves 33 sessions flagged on disk and the sidebar showing one.
     """
     prof = app_profile_dir(explicit)
     if not prof:
         return []
-    raiz = os.path.join(prof, "IndexedDB")
-    if not os.path.isdir(raiz):
+    root = os.path.join(prof, "IndexedDB")
+    if not os.path.isdir(root):
         return []
-    return sorted(d for d in glob.glob(os.path.join(raiz, '*'))
+    return sorted(d for d in glob.glob(os.path.join(root, '*'))
                   if os.path.isdir(d) and d.endswith('.leveldb'))
 
 
@@ -287,9 +287,10 @@ def write_app_index(base, template_path, cli_id, cwd, title, title_source, dry,
     return dest
 
 # ---------------------------------------------------------------------- export
-def first_user_message(lines, limite=60):
-    """Primeira fala real do usuario -- ultimo recurso de titulo, antes de
-    cair no nome da pasta (que produz varias sessoes chamadas ClaudeNode)."""
+def first_user_message(lines, limit=60):
+    """The first thing the user actually said -- the last resort for a title,
+    before falling back to the folder name (which produces several sessions all
+    called ClaudeNode)."""
     for ln in lines:
         try:
             o = json.loads(ln)
@@ -302,7 +303,7 @@ def first_user_message(lines, limite=60):
             c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
         if isinstance(c, str) and c.strip() and not c.lstrip().startswith("<"):
             t = " ".join(c.split())
-            return t[:limite].rstrip() + ("..." if len(t) > limite else "")
+            return t[:limit].rstrip() + ("..." if len(t) > limit else "")
     return None
 
 
@@ -320,14 +321,14 @@ def do_export(args):
             "cwd": detect_old_cwd(lines),
             "title": None, "titleSource": None,
             "model": None, "effort": None,
-            # a origem mostrava esta sessao na interface? Sem registro no app
-            # ela existe em disco e nao aparece em lugar nenhum. Recriar
-            # registro para todas enche o destino de sessoes que o usuario
-            # nunca viu -- em especial os ramos abandonados de retomada.
+            # did the source show this session in the interface? With no app
+            # record it exists on disk and appears nowhere. Recreating a record
+            # for every one of them fills the destination with sessions the user
+            # never saw -- abandoned resume branches above all.
             "hadAppRecord": False, "isArchived": False}
 
-    # titulos gravados no proprio transcript, na prioridade que o app usa:
-    # o nome dado pelo usuario vence o gerado automaticamente
+    # titles stored in the transcript itself, in the priority the app uses:
+    # the name the user gave beats the automatically generated one
     custom_title = ai_title = None
     for ln in lines:
         try:
@@ -528,19 +529,19 @@ def do_import(args):
 
         # ---- PIECE 2: the desktop app index record (gives the session a title + listing) ----
         if not args.no_app_index:
-            # espelha a visibilidade da origem: sessao que nao tinha registro
-            # la nao aparecia na interface, e criar um aqui inventaria uma
-            # sessao que o usuario nunca viu. --index-all forca o contrario.
-            visivel = meta.get("hadAppRecord", True) or args.index_all
-            if not visivel:
-                print("[skip] app record: sem registro na origem, "
-                      "fica so em disco (--index-all lista mesmo assim)")
+            # mirror the source's visibility: a session with no record there did
+            # not appear in the interface, and creating one here would invent a
+            # session the user never saw. --index-all forces the opposite.
+            visible = meta.get("hadAppRecord", True) or args.index_all
+            if not visible:
+                print("[skip] app record: no record at the source, "
+                      "stays on disk only (--index-all lists it anyway)")
             else:
                 base, rec_dir, template = find_record_dir(args.app_store)
                 if not template:
-                    # instalacao nova: nao ha o que clonar. O login ja criou a
-                    # pasta da conta, que e a unica coisa que nao da para
-                    # inventar -- monta o registro do zero ali dentro.
+                    # fresh install: there is nothing to clone. Signing in has
+                    # already created the account folder, which is the one thing
+                    # we cannot invent -- build the record from scratch in it.
                     base, rec_dir = find_account_dir(args.app_store)
                 if not rec_dir:
                     print("[warn] no signed-in account found. Bases searched:")
@@ -549,9 +550,9 @@ def do_import(args):
                     print("       open the app and sign in (that creates the")
                     print("       account folder), then re-run import.")
                 else:
-                    # o nome dado pelo usuario vence o gerado; so entao a
-                    # primeira mensagem; o nome da pasta e ultimo recurso
-                    # porque produz varias sessoes chamadas ClaudeNode.
+                    # the name the user gave beats the generated one; only then
+                    # the first message; the folder name is the last resort,
+                    # because it produces several sessions called ClaudeNode.
                     title = (args.title or meta.get("customTitle")
                              or meta.get("title") or meta.get("aiTitle")
                              or meta.get("firstUserMessage")
@@ -613,7 +614,7 @@ def main():
     pi.add_argument('--app-store', default=None, help='claude-code-sessions folder (default: auto per OS)')
     pi.add_argument('--no-app-index', action='store_true', help='do not create the app record (jsonl only)')
     pi.add_argument('--index-all', action='store_true',
-                     help='cria registro tambem para sessoes que nao apareciam na interface da origem')
+                     help='also create a record for sessions that did not show up in the source interface')
     pi.add_argument('--bump-version', action='store_true', help='set version to that of a local session')
     pi.add_argument('--no-sidecar', action='store_true', help='do not copy the sidecar folder')
     pi.add_argument('--with-history', action='store_true', help='register prompts in history.jsonl')

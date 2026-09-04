@@ -1,8 +1,8 @@
 """
-Um destino recem-instalado tem a pasta da conta (criada pelo login) e ZERO
-local_*.json. Antes, o importador desistia da peca 2 e a sessao existia em
-disco sem aparecer na interface -- foi exatamente o que aconteceu no teste
-em CachyOS. Estes casos travam o comportamento novo.
+A freshly installed destination has the account folder (created by signing in)
+and ZERO local_*.json. Before, the importer gave up on piece 2 and the session
+existed on disk without appearing in the interface -- exactly what happened on
+the CachyOS run. These cases pin the new behaviour down.
 """
 import json
 import os
@@ -18,65 +18,65 @@ class FreshInstall(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.base = os.path.join(self.tmp, 'claude-code-sessions')
-        self.conta = os.path.join(self.base, str(uuid.uuid4()))
+        self.account = os.path.join(self.base, str(uuid.uuid4()))
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_acha_conta_sem_nenhum_registro(self):
-        os.makedirs(self.conta)
+    def test_finds_the_account_with_no_records_at_all(self):
+        os.makedirs(self.account)
         base, rec_dir = csp.find_account_dir(self.base)
         self.assertEqual(base, self.base)
-        self.assertTrue(rec_dir.startswith(self.conta))
+        self.assertTrue(rec_dir.startswith(self.account))
 
-    def test_reaproveita_grupo_existente(self):
-        grupo = os.path.join(self.conta, str(uuid.uuid4()))
-        os.makedirs(grupo)
+    def test_reuses_an_existing_group(self):
+        group = os.path.join(self.account, str(uuid.uuid4()))
+        os.makedirs(group)
         _, rec_dir = csp.find_account_dir(self.base)
-        self.assertEqual(rec_dir, grupo)
+        self.assertEqual(rec_dir, group)
 
-    def test_sem_conta_nao_inventa(self):
+    def test_without_an_account_it_invents_nothing(self):
         os.makedirs(self.base)
         base, rec_dir = csp.find_account_dir(self.base)
         self.assertIsNone(rec_dir)
 
-    def test_escreve_registro_utilizavel(self):
-        os.makedirs(self.conta)
+    def test_writes_a_usable_record(self):
+        os.makedirs(self.account)
         _, rec_dir = csp.find_account_dir(self.base)
         dest = csp.write_app_index(self.base, None, 'cli-123', '/home/f/proj',
-                                   'Um titulo', 'user', False, rec_dir=rec_dir)
+                                   'A title', 'user', False, rec_dir=rec_dir)
         o = json.load(open(dest, encoding='utf-8'))
         self.assertEqual(o['cliSessionId'], 'cli-123')
         self.assertEqual(o['cwd'], '/home/f/proj')
         self.assertEqual(o['originCwd'], '/home/f/proj')
-        self.assertEqual(o['title'], 'Um titulo')
+        self.assertEqual(o['title'], 'A title')
         self.assertFalse(o['isArchived'])
         self.assertEqual(o['sessionId'], os.path.basename(dest)[:-5])
         for k in ('createdAt', 'lastFocusedAt', 'lastActivityAt'):
             self.assertGreater(o[k], 0)
 
-    def test_registro_sintetico_e_achavel_pelo_cli_id(self):
-        os.makedirs(self.conta)
+    def test_synthetic_record_is_findable_by_cli_id(self):
+        os.makedirs(self.account)
         _, rec_dir = csp.find_account_dir(self.base)
         csp.write_app_index(self.base, None, 'cli-abc', '/home/f/p', 't', 'user',
                             False, rec_dir=rec_dir)
         o, f = csp.find_record_by_cli('cli-abc', self.base)
         self.assertIsNotNone(o)
 
-    def test_clone_ainda_tem_prioridade(self):
-        grupo = os.path.join(self.conta, str(uuid.uuid4()))
-        os.makedirs(grupo)
-        tpl = os.path.join(grupo, 'local_%s.json' % uuid.uuid4())
+    def test_cloning_still_takes_priority(self):
+        group = os.path.join(self.account, str(uuid.uuid4()))
+        os.makedirs(group)
+        tpl = os.path.join(group, 'local_%s.json' % uuid.uuid4())
         json.dump({'cliSessionId': 'x', 'cwd': 'c', 'permissionMode': 'plan',
-                   'enabledMcpTools': {'meu:tool': True}, 'worktreeName': 'wt'},
+                   'enabledMcpTools': {'my:tool': True}, 'worktreeName': 'wt'},
                   open(tpl, 'w', encoding='utf-8'))
         base, rd, template = csp.find_record_dir(self.base)
         self.assertEqual(template, tpl)
-        dest = csp.write_app_index(base, template, 'novo', '/d', 't', 'user', False)
+        dest = csp.write_app_index(base, template, 'new', '/d', 't', 'user', False)
         o = json.load(open(dest, encoding='utf-8'))
-        self.assertEqual(o['permissionMode'], 'plan')      # herdado
-        self.assertIn('meu:tool', o['enabledMcpTools'])    # herdado
-        self.assertNotIn('worktreeName', o)                # descartado
+        self.assertEqual(o['permissionMode'], 'plan')      # inherited
+        self.assertIn('my:tool', o['enabledMcpTools'])     # inherited
+        self.assertNotIn('worktreeName', o)                # dropped
 
 
 if __name__ == '__main__':

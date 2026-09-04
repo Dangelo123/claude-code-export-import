@@ -292,9 +292,9 @@ class App(ttk.Frame):
         ttk.Entry(r, textvariable=self.mig_src_var).pack(side="left", fill="x", expand=True)
         ttk.Button(r, text="Browse…", command=self._pick_mig_src).pack(side="left", padx=(6, 0))
 
-        # As opcoes ficam ANTES da lista: a lista se estica com o tamanho da
-        # janela e empurraria para fora da tela justamente a opcao que decide
-        # se a barra lateral chega igual.
+        # The options go BEFORE the list: the list stretches with the window and
+        # would push off screen exactly the option that decides whether the
+        # sidebar arrives intact.
         self.mig_faithful = tk.BooleanVar(value=True)
         ttk.Checkbutton(s2, text="Reproduce my sidebar (pinned sessions, order, grouping)",
                         variable=self.mig_faithful).pack(anchor="w", pady=(10, 0))
@@ -446,11 +446,11 @@ class App(ttk.Frame):
                 "Existing sessions are never deleted or modified.\n\n"
                 "%s"
                 % (len(mapping),
-                   # em modo fiel a barra lateral do destino e substituida pela
-                   # da origem, e os dois armazens sao lidos so na inicializacao
+                   # in faithful mode the destination's sidebar is replaced by
+                   # the source's, and both stores are only read at startup
                    "Quit the Claude app before continuing. Your current sidebar "
                    "will be replaced by the one from the bundle (a copy of it is "
-                   "kept next to it, as .antes-do-import)."
+                   "kept next to it, as .before-import)."
                    if self.mig_faithful.get() else
                    "Close the Claude app first — it rewrites its index when it quits.")):
             return

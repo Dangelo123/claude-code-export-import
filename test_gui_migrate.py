@@ -12,22 +12,37 @@ import os
 import shutil
 import sys
 import tempfile
+import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+
+def _skip(why):
+    """
+    Skip in a way that works under BOTH entry points.
+
+    Run as a script this prints and exits 0. Under `unittest discover` an
+    exit(0) at import time surfaces as an ImportError and the whole suite goes
+    red on any machine without tkinter -- raising SkipTest reports a skip
+    instead.
+    """
+    if __name__ == '__main__':
+        print("SKIP: " + why)
+        sys.exit(0)
+    raise unittest.SkipTest(why)
+
+
 try:
     import tkinter as tk
 except Exception as e:                                   # noqa: BLE001
-    print("SKIP: tkinter unavailable (%s)" % e)
-    sys.exit(0)
+    _skip("tkinter unavailable (%s)" % e)
 
 try:
     _root = tk.Tk()
     _root.withdraw()
 except Exception as e:                                   # noqa: BLE001
-    print("SKIP: no display (%s)" % e)
-    sys.exit(0)
+    _skip("no display (%s)" % e)
 
 import gui  # noqa: E402
 
@@ -57,45 +72,45 @@ try:
         json.dump(tmpl, fh)
 
     app._load_path_map(bundle)
-    check("carrega uma linha por caminho de origem", len(app.map_entries) == 2,
-          "carregou %d" % len(app.map_entries))
+    check("loads one row per source path", len(app.map_entries) == 2,
+          "loaded %d" % len(app.map_entries))
 
-    # nada preenchido -> mapa vazio (o botao deve recusar)
-    check("mapa vazio quando nada foi digitado", app._collect_map() == {})
+    # nothing filled in -> empty map (the button must refuse)
+    check("empty map when nothing was typed", app._collect_map() == {})
 
-    # sugestao preenche os vazios
+    # the suggestion fills the blanks
     app._suggest_dests()
     m = app._collect_map()
-    check("sugestao preenche os dois campos", len(m) == 2, str(m))
-    check("sugestao usa o nome final da pasta",
+    check("suggestion fills both fields", len(m) == 2, str(m))
+    check("suggestion uses the final folder name",
           any(v.replace("\\", "/").endswith("/Alpha") for v in m.values()), str(m))
 
-    # sugestao NAO sobrescreve o que o usuario digitou
+    # the suggestion does NOT overwrite what the user typed
     src0, e0 = app.map_entries[0]
     e0.delete(0, "end")
-    e0.insert(0, "/home/me/escolhido-a-mao")
+    e0.insert(0, "/home/me/picked-by-hand")
     app._suggest_dests()
-    check("sugestao respeita valor ja digitado",
-          app._collect_map()[src0] == "/home/me/escolhido-a-mao")
+    check("suggestion respects a value already typed",
+          app._collect_map()[src0] == "/home/me/picked-by-hand")
 
-    # campo em branco = projeto pulado
+    # a blank field = project skipped
     src1, e1 = app.map_entries[1]
     e1.delete(0, "end")
     m = app._collect_map()
-    check("campo vazio deixa o projeto de fora", src1 not in m and src0 in m, str(m))
+    check("an empty field leaves the project out", src1 not in m and src0 in m, str(m))
 
-    # pasta sem template deve avisar, nao explodir
-    empty = os.path.join(tmp, 'vazia')
+    # a folder with no template should warn, not blow up
+    empty = os.path.join(tmp, 'empty')
     os.makedirs(empty)
     app._load_path_map(empty)
-    check("pasta sem template nao quebra", app.map_entries == [])
+    check("a folder with no template does not break", app.map_entries == [])
 
-    # --- as opcoes novas ---
-    # "reproduzir a barra lateral" vem LIGADO de proposito: sem ela os ids
-    # mudam e todo pinned aponta para o nada, que foi o defeito da migracao real
-    check("reproduzir a barra lateral vem ligado", app.mig_faithful.get() is True)
-    check("listar sessoes ocultas vem desligado", app.mig_index_all.get() is False)
-    check("levar config vem desligado", app.mig_with_config.get() is False)
+    # --- the new options ---
+    # "reproduce the sidebar" ships ON deliberately: without it the ids change
+    # and every pin points at nothing, which was the real migration's defect
+    check("reproduce the sidebar ships on", app.mig_faithful.get() is True)
+    check("list hidden sessions ships off", app.mig_index_all.get() is False)
+    check("carry config ships off", app.mig_with_config.get() is False)
 
     check("import-all aceita faithful", 'faithful' in gui._IMPORT_ALL_DEFAULTS)
     check("import-all aceita index_all", 'index_all' in gui._IMPORT_ALL_DEFAULTS)

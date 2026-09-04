@@ -14,7 +14,7 @@ python test_gui_migrate.py   # GUI tab (skips itself when headless)
 And the one worth running before trusting a real migration:
 
 ```bash
-python test_real_corpus.py   # replays the rewriter over YOUR transcripts, read-only
+python check_corpus.py   # replays the rewriter over YOUR transcripts, read-only
 ```
 
 It asserts that every line that parsed as JSON before still parses after, and
