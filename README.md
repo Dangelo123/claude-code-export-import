@@ -51,7 +51,7 @@ anything wrong.
 | | Verified against |
 |---|---|
 | Claude Desktop | 1.40609.x (Linux), and the Win32 + MSIX/Store builds of the same era |
-| Python | 3.9+ (standard library only) |
+| Python | 3.8+ (standard library only) — CI runs 3.8 and 3.12 |
 | Platforms | Linux, Windows, macOS |
 
 Practical consequence: **run `--dry-run` first and back up `~/.claude` before a

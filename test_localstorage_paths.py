@@ -12,9 +12,9 @@ import localstorage_paths as lp
 BS = chr(92)
 PATH_MAP = {
     'D:' + BS + 'AcmeWorkspace': '/home/f/AcmeWorkspace',
-    'C:' + BS + 'Users' + BS + 'LocalAdmin' + BS + 'Documents' + BS + 'GTD_Project':
-        '/home/f/GTD_Project',
-    'C:' + BS + 'Users' + BS + 'LocalAdmin': '/home/f',
+    'C:' + BS + 'Users' + BS + 'WinUser' + BS + 'Documents' + BS + 'NotesProject':
+        '/home/f/NotesProject',
+    'C:' + BS + 'Users' + BS + 'WinUser': '/home/f',
 }
 
 
@@ -41,9 +41,9 @@ class Rewriter(unittest.TestCase):
                          '/home/f/AcmeWorkspace')
 
     def test_longest_prefix_wins(self):
-        # C:\Users\LocalAdmin matches too, but GTD_Project is more specific
-        target = 'C:' + BS + 'Users' + BS + 'LocalAdmin' + BS + 'Documents' + BS + 'GTD_Project'
-        self.assertEqual(self.r(target), '/home/f/GTD_Project')
+        # C:\Users\WinUser matches too, but NotesProject is more specific
+        target = 'C:' + BS + 'Users' + BS + 'WinUser' + BS + 'Documents' + BS + 'NotesProject'
+        self.assertEqual(self.r(target), '/home/f/NotesProject')
 
     def test_path_outside_the_map_is_left_alone(self):
         self.assertEqual(self.r('E:' + BS + 'other' + BS + 'thing'),

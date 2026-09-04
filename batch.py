@@ -792,9 +792,9 @@ def main():
     pe.add_argument('--claude-home', default=None)
     pe.add_argument('--app-store', default=None)
     pe.add_argument('--with-config', action='store_true',
-                    help='leva tambem ~/.claude.json, settings.json e a config'
-                         ' do app (servidores MCP, permissoes). Pode conter'
-                         ' credencial: o comando avisa quais arquivos.')
+                    help='also carry ~/.claude.json, settings.json and the app'
+                         ' config (MCP servers, permissions). May contain'
+                         ' credentials: the command names which files.')
     pe.add_argument('--dry-run', action='store_true')
     pe.set_defaults(func=do_export_all)
 

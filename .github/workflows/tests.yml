@@ -44,6 +44,12 @@ jobs:
       - name: GUI migrate tab (skips itself when headless)
         run: python test_gui_migrate.py
 
+      # The unittest-based modules were never run here, so a regression in the
+      # faithful-mode, fresh-install, title/visibility or nested-rewrite suites
+      # would not have failed CI. discover picks up all of them.
+      - name: Full unittest suite
+        run: python -m unittest discover -p 'test_*.py' -v
+
       - name: Byte-compile every module
         run: python -m compileall -q claude_session_port.py batch.py gui.py
 
