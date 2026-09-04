@@ -5,6 +5,26 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-09-04
+
+Housekeeping before making the repository public.
+
+### Changed
+
+- **Test fixtures no longer carry real project names.** The suite was built from
+  the install this tool was written for, so the assertions cited actual
+  workspace and service names. They are now generic (`AcmeWorkspace`,
+  `PaymentSvc`, `/home/user`). No behaviour changed -- these are string
+  literals in fixtures -- but they had no business being published.
+
+### Added
+
+- **A compatibility section in the README.** This tool reads and writes files
+  Anthropic does not document; nothing here is a public API, and any release may
+  change the layout without notice. The section states which app version the
+  behaviour was verified against, and points at `check_corpus.py` as the
+  read-only way to tell a real breakage from a mapping mistake.
+
 ## [1.5.0] - 2026-09-04
 
 The repository was written while migrating one real install, and the parts
@@ -166,7 +186,7 @@ them lost data.
 
 - **Titles fell back to the folder name.** Only `ai-title` was read, so the 132
   sessions the user had renamed (of 184) showed up as `ClaudeNode` or
-  `ClaudeCowork_MeepGreenfield`, repeated down the sidebar. The chain is now
+  `AcmeWorkspace`, repeated down the sidebar. The chain is now
   `custom-title` → `ai-title` → source record → first user message → folder name.
 - **Sessions that were invisible at the source became visible at the
   destination.** Creating a record for *every* transcript surfaced 108 sessions

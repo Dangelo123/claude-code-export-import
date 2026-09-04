@@ -4,7 +4,7 @@ Two regressions seen on the real migration to CachyOS:
 
 1. The importer only looked at 'ai-title'. Sessions the user had renamed (132
    out of 184 in the real corpus) fell back to the folder name, and the sidebar
-   filled up with "ClaudeNode" and "ClaudeCowork_MeepGreenfield".
+   filled up with "ClaudeNode" and "AcmeWorkspace".
 
 2. The importer created an app record for EVERY session. Sessions that had no
    record at the source did not appear in that interface -- abandoned resume
@@ -39,8 +39,8 @@ class Title(unittest.TestCase):
         self.assertEqual(custom or ai, 'my own name')
 
     def test_first_message_as_last_resort(self):
-        ls = lines({'type': 'user', 'message': {'content': 'fix the totem deploy'}})
-        self.assertEqual(csp.first_user_message(ls), 'fix the totem deploy')
+        ls = lines({'type': 'user', 'message': {'content': 'fix the kiosk deploy'}})
+        self.assertEqual(csp.first_user_message(ls), 'fix the kiosk deploy')
 
     def test_first_message_ignores_system_block(self):
         ls = lines({'type': 'user', 'message': {'content': '<system-reminder>x</system-reminder>'}},

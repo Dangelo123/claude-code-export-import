@@ -11,7 +11,7 @@ import localstorage_paths as lp
 
 BS = chr(92)
 PATH_MAP = {
-    'D:' + BS + 'ClaudeCowork_MeepGreenfield': '/home/f/ClaudeCowork_MeepGreenfield',
+    'D:' + BS + 'AcmeWorkspace': '/home/f/AcmeWorkspace',
     'C:' + BS + 'Users' + BS + 'LocalAdmin' + BS + 'Documents' + BS + 'GTD_Project':
         '/home/f/GTD_Project',
     'C:' + BS + 'Users' + BS + 'LocalAdmin': '/home/f',
@@ -23,22 +23,22 @@ class Rewriter(unittest.TestCase):
         self.r = lp.build_rewriter(PATH_MAP, True)
 
     def test_raw_path(self):
-        self.assertEqual(self.r('D:' + BS + 'ClaudeCowork_MeepGreenfield'),
-                         '/home/f/ClaudeCowork_MeepGreenfield')
+        self.assertEqual(self.r('D:' + BS + 'AcmeWorkspace'),
+                         '/home/f/AcmeWorkspace')
 
     def test_tail_switches_separator(self):
         self.assertEqual(
-            self.r('D:' + BS + 'ClaudeCowork_MeepGreenfield' + BS + 'src' + BS + 'A.cs'),
-            '/home/f/ClaudeCowork_MeepGreenfield/src/A.cs')
+            self.r('D:' + BS + 'AcmeWorkspace' + BS + 'src' + BS + 'A.cs'),
+            '/home/f/AcmeWorkspace/src/A.cs')
 
     def test_path_escaped_in_json(self):
-        given = '{"folder":"D:' + BS * 2 + 'ClaudeCowork_MeepGreenfield' + BS * 2 + 'sub"}'
+        given = '{"folder":"D:' + BS * 2 + 'AcmeWorkspace' + BS * 2 + 'sub"}'
         self.assertEqual(self.r(given),
-                         '{"folder":"/home/f/ClaudeCowork_MeepGreenfield/sub"}')
+                         '{"folder":"/home/f/AcmeWorkspace/sub"}')
 
     def test_forward_slash_matches_too(self):
-        self.assertEqual(self.r('D:/ClaudeCowork_MeepGreenfield'),
-                         '/home/f/ClaudeCowork_MeepGreenfield')
+        self.assertEqual(self.r('D:/AcmeWorkspace'),
+                         '/home/f/AcmeWorkspace')
 
     def test_longest_prefix_wins(self):
         # C:\Users\LocalAdmin matches too, but GTD_Project is more specific
@@ -55,10 +55,10 @@ class Rewriter(unittest.TestCase):
 
     def test_does_not_break_a_backslash_that_is_not_a_path(self):
         # the backslash here belongs to an escape sequence, not to a path
-        given = '{"re":"' + BS * 2 + 'd+","p":"D:' + BS * 2 + 'ClaudeCowork_MeepGreenfield"}'
+        given = '{"re":"' + BS * 2 + 'd+","p":"D:' + BS * 2 + 'AcmeWorkspace"}'
         out = self.r(given)
         self.assertIn(BS * 2 + 'd+', out)
-        self.assertIn('/home/f/ClaudeCowork_MeepGreenfield', out)
+        self.assertIn('/home/f/AcmeWorkspace', out)
 
 
 class Encoding(unittest.TestCase):

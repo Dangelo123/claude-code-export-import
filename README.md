@@ -41,6 +41,31 @@ Full write-up: **[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)**.
 
 ---
 
+## Compatibility, and what that means
+
+This tool reads and writes files Anthropic does not document. Nothing here is a
+public API: the layout was worked out by reading a real install, and Anthropic
+is free to change any of it in any release, without notice and without doing
+anything wrong.
+
+| | Verified against |
+|---|---|
+| Claude Desktop | 1.40609.x (Linux), and the Win32 + MSIX/Store builds of the same era |
+| Python | 3.9+ (standard library only) |
+| Platforms | Linux, Windows, macOS |
+
+Practical consequence: **run `--dry-run` first and back up `~/.claude` before a
+real import.** If a future app version changes the record format, this tool will
+either warn or write something the app ignores -- it never deletes transcripts --
+but the sidebar fidelity it promises is only as current as the last version it
+was tested against.
+
+If you hit a version where it misbehaves, `check_corpus.py` replays the rewrite
+over your own transcripts read-only and reports what it would have changed. That
+is the fastest way to tell a real breakage from a mapping mistake.
+
+---
+
 ## Install
 
 **No Python? Grab the standalone Windows binary** from the
