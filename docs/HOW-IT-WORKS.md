@@ -27,7 +27,7 @@ index-driven.
 - **Folder encoding:** `ENC(cwd) = re.sub(r'[^A-Za-z0-9]', '-', cwd)`. Every
   non-alphanumeric character of the absolute working directory becomes `-`,
   with no collapsing of repeats. Examples:
-  - `C:\Users\Me\Documents\GTD_Project` → `C--Users-Me-Documents-GTD-Project`
+  - `C:\Users\Me\Documents\NotesProject` → `C--Users-Me-Documents-NotesProject`
   - `/home/me/proj` → `-home-me-proj`
 - **Per-line structural fields:** `cwd` (absolute path) and `sessionId`
   (which **must equal the filename**). Other fields (`version`, `gitBranch`,

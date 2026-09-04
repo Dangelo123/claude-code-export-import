@@ -21,10 +21,10 @@ import batch  # noqa: E402
 import claude_session_port as csp  # noqa: E402
 
 WIN_ROOT = r"D:\Proj"
-WIN_GTD = r"C:\Users\Someone\Documents\GTD_Project"
+WIN_NOTES = r"C:\Users\Someone\Documents\NotesProject"
 POSIX_ROOT = "/home/tester/proj"
-POSIX_GTD = "/home/tester/gtd"
-MAP = {WIN_ROOT: POSIX_ROOT, WIN_GTD: POSIX_GTD}
+POSIX_NOTES = "/home/tester/notes"
+MAP = {WIN_ROOT: POSIX_ROOT, WIN_NOTES: POSIX_NOTES}
 
 fails = []
 
@@ -48,8 +48,8 @@ try:
     p_root = os.path.join(src_home, 'projects', csp.enc_project(WIN_ROOT), 'memory')
     p_wt = os.path.join(src_home, 'projects',
                         csp.enc_project(WIN_ROOT + r"\.claude\worktrees\wt-1"), 'memory')
-    p_gtd = os.path.join(src_home, 'projects', csp.enc_project(WIN_GTD), 'memory')
-    for d in (p_root, p_wt, p_gtd):
+    p_notes = os.path.join(src_home, 'projects', csp.enc_project(WIN_NOTES), 'memory')
+    for d in (p_root, p_wt, p_notes):
         os.makedirs(d)
 
     with open(os.path.join(p_root, 'MEMORY.md'), 'w', encoding='utf-8') as fh:
@@ -60,8 +60,8 @@ try:
         fh.write("run in `%s` and see %s\\docs\\a.md\n" % (WIN_ROOT, WIN_ROOT))
     with open(os.path.join(p_wt, 'wt.md'), 'w', encoding='utf-8') as fh:
         fh.write("worktree of %s\n" % WIN_ROOT)
-    with open(os.path.join(p_gtd, 'gtd.md'), 'w', encoding='utf-8') as fh:
-        fh.write("project in %s\n" % WIN_GTD)
+    with open(os.path.join(p_notes, 'notes.md'), 'w', encoding='utf-8') as fh:
+        fh.write("project in %s\n" % WIN_NOTES)
     with open(os.path.join(src_home, 'CLAUDE.md'), 'w', encoding='utf-8') as fh:
         fh.write("global instructions\nmain project: %s\n" % WIN_ROOT)
     # binary: must not be corrupted by the rewrite
@@ -100,7 +100,7 @@ try:
 
     proj_slug = csp.enc_project(POSIX_ROOT)
     wt_slug = csp.enc_project(POSIX_ROOT + "/.claude/worktrees/wt-1")
-    gtd_slug = csp.enc_project(POSIX_GTD)
+    notes_slug = csp.enc_project(POSIX_NOTES)
 
     setup = read('projects', proj_slug, 'memory', 'setup.md')
     check("memory restored under the remapped slug", setup is not None)
@@ -111,8 +111,8 @@ try:
     wt = read('projects', wt_slug, 'memory', 'wt.md')
     check("worktree remapped by prefix", wt is not None and POSIX_ROOT in wt)
 
-    gtd = read('projects', gtd_slug, 'memory', 'gtd.md')
-    check("second root remapped", gtd is not None and POSIX_GTD in gtd)
+    notes = read('projects', notes_slug, 'memory', 'notes.md')
+    check("second root remapped", notes is not None and POSIX_NOTES in notes)
 
     cl = read('CLAUDE.md')
     check("global CLAUDE.md restored", cl is not None)
