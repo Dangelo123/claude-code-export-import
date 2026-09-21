@@ -68,9 +68,9 @@ is the fastest way to tell a real breakage from a mapping mistake.
 
 ## Install
 
-**No Python? Grab the standalone Windows binary** from the
+**No Python? Grab a standalone binary** (Windows, Linux) from the
 [latest release](https://github.com/Dangelo123/claude-code-export-import/releases/latest)
-(`claude-code-export-import-win-x64.exe`) and use it like the commands below,
+(`claude-code-export-import-cli-win-x64.exe` or `claude-code-export-import-cli-linux-x64`) and use it like the commands below,
 replacing `python claude_session_port.py` with the `.exe`.
 
 **From source** (any OS, Python 3.8+, standard library only — no dependencies):
@@ -88,7 +88,7 @@ cd claude-code-export-import
 
 Download the GUI build from the
 [latest release](https://github.com/Dangelo123/claude-code-export-import/releases/latest)
-(`claude-code-export-import-gui-win-x64.exe`) and double-click it.
+(`claude-code-export-import-gui-win-x64.exe`, or `claude-code-export-import-gui-linux-x64` on Linux -- `chmod +x` it first) and double-click it.
 
 - **Export tab** — pick a session from the list (by title) and save a `.zip`.
 - **Import tab** — choose a `.zip` you received and click **Import**.

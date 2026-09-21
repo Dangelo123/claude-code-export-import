@@ -62,3 +62,34 @@ jobs:
           gh release upload "${GITHUB_REF_NAME}" \
             "dist/claude-code-export-import-gui-macos-universal.zip" \
             "dist/claude-code-export-import-cli-macos-universal" --clobber
+
+  linux:
+    # 22.04 on purpose: PyInstaller bakes in the build machine glibc, and a
+    # binary built on a newer one refuses to start on older distributions.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Tk (the GUI needs it present at build time to be bundled)
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+      - run: pip install pyinstaller
+      - name: Build CLI
+        run: pyinstaller --onefile --console --name claude-code-export-import-cli-linux-x64 claude_session_port.py
+      - name: Build GUI
+        run: pyinstaller --onefile --windowed --name claude-code-export-import-gui-linux-x64 gui.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/claude-code-export-import-cli-linux-x64
+            dist/claude-code-export-import-gui-linux-x64
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/claude-code-export-import-cli-linux-x64 \
+            dist/claude-code-export-import-gui-linux-x64 --clobber

@@ -5,6 +5,36 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-09-21
+
+The GUI was unusable on Linux without anyone noticing: it was written and
+tested on Windows, where the defaults happen to fit.
+
+### Fixed
+
+- **Session names no longer clipped in the list.** Tk gives Treeview rows a
+  fixed 20px height whatever the font is. The Linux default font is taller
+  than that (Noto Sans 10 needs 28px), so every title was cut off mid-glyph.
+  The row height now comes from the font actually in use, which also covers
+  scaled displays and anyone running a larger system font.
+- **"Claude app store (claude-code-sessions)" is readable again.** The folder
+  labels were 34 characters wide; that one is 40.
+- **The window no longer cuts its own layout off.** The fixed 780x620 could not
+  hold the content at larger font sizes; it now sizes to what the widgets ask
+  for, never below the previous default.
+
+### Changed
+
+- **The app opens on the "Migrate everything" tab.** Moving a whole machine is
+  the common case; the single-session tabs stay one click away.
+
+### Added
+
+- **Linux binaries in the release.** CLI and GUI, x64, built on glibc 2.35 so
+  they run on older distributions too. Until now the release shipped Windows
+  and macOS only -- which meant the release fixing a Linux-only bug had nothing
+  for Linux users to download.
+
 ## [1.5.1] - 2026-09-04
 
 Housekeeping before making the repository public.
