@@ -20,7 +20,7 @@ import sys
 import contextlib
 import threading
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import ttk, filedialog, messagebox, scrolledtext, font as tkfont
 
 import batch
 import claude_session_port as core
@@ -90,6 +90,10 @@ class App(ttk.Frame):
         self._build_import(self.tab_import)
         self._build_migrate(self.tab_migrate)
 
+        # land on "Migrate everything": moving a whole machine is the common case;
+        # the single-session tabs stay one click away.
+        nb.select(self.tab_migrate)
+
         ttk.Label(self, text="Log:").pack(anchor="w", pady=(8, 0))
         self.log = scrolledtext.ScrolledText(self, height=8, wrap="word", state="disabled")
         self.log.pack(fill="both", expand=False)
@@ -140,7 +144,7 @@ class App(ttk.Frame):
 
     def _folder_row(self, parent, label, var, browse, hint=""):
         row = ttk.Frame(parent); row.pack(fill="x", pady=2)
-        ttk.Label(row, text=label, width=34).pack(side="left")
+        ttk.Label(row, text=label, width=42).pack(side="left")
         ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True)
         ttk.Button(row, text="Browse…", command=browse).pack(side="left", padx=(6, 0))
         if hint:
@@ -552,10 +556,24 @@ def main():
     root.title("Claude Code — Export / Import sessions")
     root.geometry("780x620")
     try:
-        ttk.Style().theme_use("vista" if sys.platform == "win32" else "clam")
+        st = ttk.Style()
+        st.theme_use("vista" if sys.platform == "win32" else "clam")
+        # Tk defaults Treeview rows to 20px regardless of the font. On Linux and on
+        # scaled displays the default font is taller than that and the session names
+        # get clipped, so derive the row height from the font actually in use.
+        line = tkfont.nametofont("TkDefaultFont").metrics("linespace")
+        st.configure("Treeview", rowheight=line + 6)
     except Exception:
         pass
     App(root)
+    # size to what the widgets actually need (never smaller than the old default),
+    # so a larger system font does not cut the layout off
+    try:
+        root.update_idletasks()
+        root.geometry("%dx%d" % (max(780, root.winfo_reqwidth()),
+                                 max(620, root.winfo_reqheight())))
+    except Exception:
+        pass
     root.mainloop()
 
 
