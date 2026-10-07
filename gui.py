@@ -2,9 +2,12 @@
 """
 Point-and-click GUI for claude-code-export-import.
 
-Two tabs:
+Tabs:
   * Export — pick one, several, or ALL sessions (by title) and save .zip(s).
+  * Export a cloud session — paste a claude.ai/code link; it is pulled down
+    with Claude Code's own teleport and saved as a .zip like any other.
   * Import — choose one or more .zip files you received and click Import.
+  * Migrate everything — a whole install, to another machine or OS.
 
 If no sessions show up, you can point the app at Claude's folders manually
 (bottom of the Export tab).
@@ -38,8 +41,12 @@ _IMPORT_DEFAULTS = dict(
     no_app_index=False, bump_version=False, no_sidecar=False, with_history=False,
     dry_run=False,
 )
+_EXPORT_CLOUD_DEFAULTS = dict(session=None, cwd=None, out=None, title=None, claude_bin=None,
+                              claude_home=None, app_store=None, keep_teleport_tail=False,
+                              interactive=False, dry_run=False)
 _EXPORT_ALL_DEFAULTS = dict(out=None, claude_home=None, app_store=None,
-                            with_config=False, dry_run=False)
+                            with_config=False, dry_run=False,
+                            cloud=None, cloud_file=None, cloud_folder=None, claude_bin=None)
 _IMPORT_ALL_DEFAULTS = dict(
     src=None, path_map=None, claude_home=None, app_store=None, keep_id=False,
     no_app_index=False, index_all=False, faithful=False, with_history=False,
@@ -81,12 +88,15 @@ class App(ttk.Frame):
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True)
         self.tab_export = ttk.Frame(nb, padding=10)
+        self.tab_cloud = ttk.Frame(nb, padding=10)
         self.tab_import = ttk.Frame(nb, padding=10)
         self.tab_migrate = ttk.Frame(nb, padding=10)
         nb.add(self.tab_export, text="  Export a session  ")
+        nb.add(self.tab_cloud, text="  Export a cloud session  ")
         nb.add(self.tab_import, text="  Import a session  ")
         nb.add(self.tab_migrate, text="  Migrate everything  ")
         self._build_export(self.tab_export)
+        self._build_cloud(self.tab_cloud)
         self._build_import(self.tab_import)
         self._build_migrate(self.tab_migrate)
 
@@ -234,6 +244,75 @@ class App(ttk.Frame):
             logs.append(text.strip())
         return ok_all, "\n".join(logs)
 
+    # ------------------------------------------------------------------ cloud
+    def _build_cloud(self, t):
+        ttk.Label(t, text="Export a session that ran in the cloud (claude.ai/code, or Cloud in the app).",
+                  font=("", 10, "bold")).pack(anchor="w")
+        ttk.Label(t, text="It has no copy on this computer, so it is pulled down first with Claude Code's "
+                          "own teleport, then saved as a .zip you import like any other.",
+                  foreground="#555", wraplength=700, justify="left").pack(anchor="w", pady=(0, 10))
+
+        r1 = ttk.Frame(t); r1.pack(fill="x", pady=4)
+        ttk.Label(r1, text="Session link or id:", width=26).pack(side="left")
+        self.cloud_id_var = tk.StringVar()
+        ttk.Entry(r1, textvariable=self.cloud_id_var).pack(side="left", fill="x", expand=True)
+        ttk.Label(t, text="     e.g. https://claude.ai/code/session_01Ab…  (Open in › Terminal copies it too)",
+                  foreground="#999").pack(anchor="w")
+
+        r2 = ttk.Frame(t); r2.pack(fill="x", pady=4)
+        ttk.Label(r2, text="Project folder for it:", width=26).pack(side="left")
+        self.cloud_dir_var = tk.StringVar()
+        ttk.Entry(r2, textvariable=self.cloud_dir_var).pack(side="left", fill="x", expand=True)
+        ttk.Button(r2, text="Browse…", command=self._pick_cloud_dir).pack(side="left", padx=(6, 0))
+        ttk.Label(t, text="     where the session will belong, e.g. your clone of its repository; nothing in it is changed",
+                  foreground="#999").pack(anchor="w")
+
+        r3 = ttk.Frame(t); r3.pack(fill="x", pady=4)
+        ttk.Label(r3, text="Title (optional):", width=26).pack(side="left")
+        self.cloud_title_var = tk.StringVar()
+        ttk.Entry(r3, textvariable=self.cloud_title_var).pack(side="left", fill="x", expand=True)
+        ttk.Label(t, text="     the name it had in the cloud list; it is not part of the conversation itself",
+                  foreground="#999").pack(anchor="w")
+
+        need = ttk.LabelFrame(t, text="Needs", padding=8)
+        need.pack(fill="x", pady=(10, 0))
+        ttk.Label(need, text="• Once, in a terminal: claude auth login — Claude Code signed in with the "
+                             "claude.ai account that owns the session.\n"
+                             "• Only sessions that actually ran in Anthropic's cloud come down with their conversation.",
+                  justify="left", wraplength=680).pack(anchor="w")
+
+        self.btn_cloud = ttk.Button(t, text="Export cloud session…", command=self._do_export_cloud)
+        self.btn_cloud.pack(anchor="e", pady=(12, 0))
+
+    def _pick_cloud_dir(self):
+        p = filedialog.askdirectory(title="Project folder for the cloud session")
+        if p:
+            self.cloud_dir_var.set(os.path.normpath(p))
+
+    def _do_export_cloud(self):
+        if self._busy:
+            return
+        cloud_id = core.parse_cloud_id(self.cloud_id_var.get())
+        if not cloud_id:
+            messagebox.showinfo("Session link", "Paste the session's claude.ai/code link (or its session_… id).")
+            return
+        folder = self.cloud_dir_var.get().strip()
+        if not folder:
+            messagebox.showinfo("Project folder", "Choose the project folder the session should belong to.")
+            return
+        title = self.cloud_title_var.get().strip() or None
+        out = filedialog.asksaveasfilename(
+            title="Save the session as", defaultextension=".zip",
+            initialfile=_safe_name(title, cloud_id) + ".zip",
+            filetypes=[("Zip bundle", "*.zip")])
+        if not out:
+            return
+        self._busy_run(
+            lambda: _run(core.do_export_cloud, _EXPORT_CLOUD_DEFAULTS,
+                         session=cloud_id, cwd=folder, title=title, out=out),
+            "Exported",
+            f"Saved {os.path.basename(out)}.\n\nImport it on the other machine like any other session.")
+
     # ----------------------------------------------------------------- import
     def _build_import(self, t):
         ttk.Label(t, text="Import session .zip(s) you received.",
@@ -282,6 +361,21 @@ class App(ttk.Frame):
                            "again. These files can hold passwords and API tokens — the log "
                            "names each one that does.",
                   foreground="#777", wraplength=520, justify="left").pack(anchor="w", padx=(20, 0))
+
+        ttk.Label(s1, text="Cloud sessions to bring along (optional) — one claude.ai/code link per line; "
+                           "add  | <folder>  to give one its own project folder:",
+                  wraplength=700, justify="left").pack(anchor="w", pady=(10, 2))
+        self.mig_cloud_text = tk.Text(s1, height=3, wrap="none")
+        self.mig_cloud_text.pack(fill="x")
+        r = ttk.Frame(s1); r.pack(fill="x", pady=(4, 0))
+        ttk.Label(r, text="Their project folder:", width=20).pack(side="left")
+        self.mig_cloud_dir_var = tk.StringVar()
+        ttk.Entry(r, textvariable=self.mig_cloud_dir_var).pack(side="left", fill="x", expand=True)
+        ttk.Button(r, text="Browse…", command=self._pick_mig_cloud_dir).pack(side="left", padx=(6, 0))
+        ttk.Label(s1, text="They live in your account, not on this disk: on a new machine with the same "
+                           "account they are already there. List them when changing accounts, or to keep "
+                           "them as local sessions. Needs Claude Code signed in (claude auth login).",
+                  foreground="#777", wraplength=700, justify="left").pack(anchor="w", padx=(20, 0))
 
         self.btn_export_all = ttk.Button(s1, text="Export everything",
                                          command=self._do_export_all)
@@ -343,6 +437,11 @@ class App(ttk.Frame):
         self.btn_import_all = ttk.Button(bar, text="Restore everything",
                                          command=lambda: self._do_import_all(False))
         self.btn_import_all.pack(side="right")
+
+    def _pick_mig_cloud_dir(self):
+        p = filedialog.askdirectory(title="Project folder for the cloud sessions")
+        if p:
+            self.mig_cloud_dir_var.set(os.path.normpath(p))
 
     def _pick_mig_out(self):
         d = filedialog.askdirectory(title="Folder to save the migration bundle")
@@ -422,11 +521,21 @@ class App(ttk.Frame):
             messagebox.showwarning("Pick a folder", "Choose where to save the bundle.")
             return
 
+        cloud = self.mig_cloud_text.get("1.0", "end").strip()
+        cloud_dir = self.mig_cloud_dir_var.get().strip() or None
+        if cloud and not cloud_dir and any(core.parse_cloud_id(ln) and "|" not in ln
+                                           for ln in cloud.splitlines()):
+            messagebox.showwarning("Project folder",
+                                   "Choose the project folder for the cloud sessions "
+                                   "(or add  | <folder>  to each line).")
+            return
+
         def work():
             return _run(batch.do_export_all, _EXPORT_ALL_DEFAULTS,
                         out=out, claude_home=self._home_or_none(),
                         app_store=self._store_or_none(),
-                        with_config=self.mig_with_config.get())
+                        with_config=self.mig_with_config.get(),
+                        cloud=[cloud] if cloud else [], cloud_folder=cloud_dir)
 
         self._busy_run(work, "Exported",
                        "Everything bundled.\n\nCopy this folder to the new machine, "
@@ -541,7 +650,7 @@ class App(ttk.Frame):
     def _set_busy(self, busy):
         self._busy = busy
         state = "disabled" if busy else "normal"
-        for b in (self.btn_export, self.btn_import):
+        for b in (self.btn_export, self.btn_cloud, self.btn_import):
             b.configure(state=state)
 
     def _append_log(self, text):

@@ -119,10 +119,47 @@ def iter_sessions(claude_home):
             yield proj, full, csp.detect_old_cwd(lines)
 
 
+# ------------------------------------------------------------- cloud sessions
+def parse_cloud_specs(items, default_folder=None):
+    """[(cloud id, folder)] from entries holding one session per line: its
+    claude.ai/code link (or id), optionally followed by ' | <project folder>'.
+    Blank lines and # comments are skipped."""
+    specs, bad, seen = [], [], set()
+    for item in items or []:
+        for line in item.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            link, _, folder = line.partition('|')
+            cid = csp.parse_cloud_id(link)
+            if not cid:
+                bad.append(line)
+                continue
+            folder = folder.strip() or default_folder
+            if not folder:
+                sys.exit("[error] no project folder for %s: pass --cloud-folder, or write "
+                         "'<link> | <folder>'" % cid)
+            if cid not in seen:
+                seen.add(cid)
+                specs.append((cid, os.path.abspath(os.path.expanduser(folder))))
+    if bad:
+        sys.exit("[error] not a cloud session link:\n  " + "\n  ".join(bad))
+    return specs
+
+
 # ---------------------------------------------------------------- export-all
 def do_export_all(args):
     home = csp.default_claude_home(args.claude_home)
     out_dir = os.path.abspath(args.out)
+
+    # cloud sessions to bring along: they live in the account, not on this disk,
+    # so they only travel when listed -- check the CLI first, not after the rest
+    cloud_items = list(args.cloud or [])
+    if args.cloud_file:
+        with open(args.cloud_file, encoding='utf-8') as fh:
+            cloud_items.append(fh.read())
+    clouds = parse_cloud_specs(cloud_items, args.cloud_folder)
+    cli = csp.cloud_cli(args.claude_bin, args.app_store) if clouds and not args.dry_run else None
     os.makedirs(out_dir, exist_ok=True)
 
     found, cwds, skipped = [], {}, 0
@@ -139,6 +176,8 @@ def do_export_all(args):
     if args.dry_run:
         for c, n in sorted(cwds.items(), key=lambda kv: -kv[1]):
             print("   %4d  %s" % (n, c))
+        for cid, folder in clouds:
+            print("   cloud %s  ->  %s" % (cid, folder))
         return
 
     manifest = []
@@ -155,6 +194,17 @@ def do_export_all(args):
             print("[warn] skipped %s: %s" % (sid, e))
         if i % 25 == 0:
             print("   ... %d/%d" % (i, len(found)))
+
+    for cid, folder in clouds:
+        zpath = os.path.join(out_dir, cid + '.zip')
+        try:
+            sid, _ = csp.export_cloud(cid, folder, zpath, cli, claude_home=args.claude_home,
+                                      app_store=args.app_store)
+            manifest.append({"sessionId": sid, "project": csp.enc_project(folder), "cwd": folder,
+                             "bundle": os.path.basename(zpath), "cloudSessionId": cid})
+            cwds[folder] = cwds.get(folder, 0) + 1
+        except SystemExit as e:
+            print("[warn] cloud session %s skipped: %s" % (cid, e))
 
     with open(os.path.join(out_dir, 'manifest.json'), 'w', encoding='utf-8') as fh:
         json.dump(manifest, fh, ensure_ascii=False, indent=2)
@@ -242,7 +292,11 @@ def do_import_all(args):
             keep_id=args.keep_id or faithful,
             keep_paths=True,
             git_branch=None, title_suffix=None, title=None,
-            app_store=args.app_store, no_app_index=args.no_app_index or faithful, index_all=args.index_all,
+            # a cloud session has no record in the source's app profile, so even in
+            # faithful mode it gets one made, or it would never show up
+            app_store=args.app_store,
+            no_app_index=args.no_app_index or (faithful and not ent.get('cloudSessionId')),
+            index_all=args.index_all,
             bump_version=False, no_sidecar=False, with_history=args.with_history,
             dry_run=False)
         # snapshot the destination so the deep rewrite only ever touches the
@@ -795,6 +849,15 @@ def main():
                     help='also carry ~/.claude.json, settings.json and the app'
                          ' config (MCP servers, permissions). May contain'
                          ' credentials: the command names which files.')
+    pe.add_argument('--cloud', action='append', default=[], metavar='"LINK [| FOLDER]"',
+                    help='also bring a cloud session (claude.ai/code link or id), pulled down with '
+                         '`claude --teleport`; repeatable. "| FOLDER" names its project folder')
+    pe.add_argument('--cloud-file', default=None,
+                    help='file with one cloud session per line, same format as --cloud')
+    pe.add_argument('--cloud-folder', default=None,
+                    help='project folder for cloud sessions that do not name one')
+    pe.add_argument('--claude-bin', default=None,
+                    help='Claude Code CLI for the cloud sessions (default: `claude` on PATH, else the app\'s copy)')
     pe.add_argument('--dry-run', action='store_true')
     pe.set_defaults(func=do_export_all)
 

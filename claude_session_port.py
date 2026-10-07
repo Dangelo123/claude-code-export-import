@@ -27,10 +27,14 @@ Usage:
   # 2) On the TARGET machine: retarget the cwd and install both pieces
   python claude_session_port.py import --src <bundle.zip|session.jsonl> [--target-cwd "D:\\Work\\Project"]
 
+  # Cloud sessions (claude.ai/code, or "Cloud" in the desktop app) have no local
+  # transcript: export-cloud pulls one down with `claude --teleport` first
+  python claude_session_port.py export-cloud <session_...|claude.ai/code URL> --cwd <its project folder>
+
 This is an unofficial tool that manipulates undocumented local files. It is not
 affiliated with or endorsed by Anthropic. Back up ~/.claude before using it.
 """
-import argparse, json, os, re, sys, shutil, zipfile, uuid, tempfile, time, glob
+import argparse, json, os, re, sys, shutil, subprocess, zipfile, uuid, tempfile, time, glob
 try:
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
@@ -353,6 +357,15 @@ def do_export(args):
     else:
         meta["title"] = custom_title or ai_title
 
+    # export-cloud: the session came from the cloud list, where the user saw it --
+    # so it has to show up after import too -- and its name lives only there
+    if getattr(args, "cloud_session_id", None):
+        meta["cloudSessionId"] = args.cloud_session_id
+        meta["hadAppRecord"] = True
+    if getattr(args, "title", None):
+        meta["title"] = meta["customTitle"] = args.title
+        meta["titleSource"] = "user"
+
     if args.dry_run:
         print(f"[dry] zip -> {out}\n  + {os.path.basename(src)}  + meta.json (title={meta['title']!r})")
         if os.path.isdir(sidecar):
@@ -369,6 +382,265 @@ def do_export(args):
                     z.write(full, arcname=rel)
     print(f"[ok] bundle: {out}   (title={meta['title']!r})")
     print("     copy this zip to the other machine and run 'import' — title/cwd travel with it.")
+
+# -------------------------------------------------------------- cloud sessions
+# A cloud session (claude.ai/code, or "Cloud" in the desktop app) runs on
+# Anthropic's servers, so there is no local transcript to export. Claude Code's
+# own `claude --teleport <id>` pulls one down and writes the whole conversation
+# to a local transcript, which exports like any other. The teleport needs the
+# CLI signed in to the claude.ai account that owns the session. Run in print
+# mode it checks no repository and switches no branch, so it runs in an empty
+# scratch folder and the session is then given the project folder it belongs to.
+TELEPORT_MARKER = "This session is being continued from another machine"
+CLOUD_ID_RE = re.compile(r'\b(?:session|cse)_[A-Za-z0-9]+')
+
+# what the teleport and the /exit that ends it append after the conversation
+_TAIL_TYPES = {'system', 'attachment', 'permission-mode', 'file-history-snapshot',
+               'last-prompt', 'atis-latch', 'cost-state'}
+_LOCAL_COMMAND = ('<local-command-caveat>', '<command-name>', '<command-message>',
+                  '<local-command-stdout>', '<local-command-stderr>')
+
+
+def parse_cloud_id(text):
+    """session_... (or cse_...) from a bare id or a claude.ai/code URL."""
+    m = CLOUD_ID_RE.search(text or '')
+    return m.group(0) if m else None
+
+
+def teleport_env(environ=None):
+    """The environment for the teleport, and whether it had to be cleaned.
+
+    Run from inside a Claude Code session (an agent using this tool, a terminal
+    in the desktop app), the child inherits that session's markers --
+    CLAUDE_CODE_CHILD_SESSION alone turns transcript saving off, which leaves
+    nothing to export. Outside one, the environment goes through untouched."""
+    env = dict(os.environ if environ is None else environ)
+    if not any(k in env for k in ('CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_ENTRYPOINT')):
+        return env, False
+    for k in list(env):
+        if k.startswith('CLAUDE_CODE_') or k in ('CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT',
+                                                  'CLAUDE_AGENT_SDK_VERSION', 'ANTHROPIC_BASE_URL'):
+            del env[k]
+    return env, True
+
+
+def _run(cmd, cwd=None, env=None, merge_stderr=False, timeout=None):
+    try:
+        r = subprocess.run(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
+                           text=True, encoding='utf-8', errors='replace', timeout=timeout)
+    except OSError as e:
+        return 127, str(e)
+    except subprocess.TimeoutExpired:
+        return 124, f"no answer after {timeout} s"
+    return r.returncode, (r.stdout or '').strip()
+
+
+def find_claude_cli(app_store=None):
+    """The Claude Code CLI: `claude` on PATH, else the one the desktop app ships
+    next to its claude-code-sessions folder (claude-code/<version>/claude), so a
+    desktop-only user does not have to install anything. Newest version wins."""
+    on_path = shutil.which('claude')
+    if on_path:
+        return on_path
+    exe = 'claude.exe' if os.name == 'nt' else 'claude'
+
+    def version(p):
+        v = os.path.basename(os.path.dirname(p))
+        return tuple(int(x) if x.isdigit() else 0 for x in re.split(r'[.\-]', v))
+    found = []
+    for base in candidate_app_store_bases(app_store):
+        found += [p for p in glob.glob(os.path.join(os.path.dirname(base), 'claude-code', '*', exe))
+                  if os.path.isfile(p)]
+    return max(found, key=version) if found else None
+
+
+def _jline(ln):
+    try:
+        o = json.loads(ln)
+    except Exception:
+        return None
+    return o if isinstance(o, dict) else None
+
+
+def _text(o):
+    c = (o.get('message') or {}).get('content')
+    if isinstance(c, list):
+        c = ''.join(x.get('text', '') for x in c if isinstance(x, dict))
+    return c if isinstance(c, str) else ''
+
+
+def teleport_split(lines):
+    """Where the teleport starts in a transcript.
+
+    Returns (marker_index, history, tail_is_noise): history counts the user and
+    assistant entries before the marker, i.e. the conversation that came down
+    from the cloud; tail_is_noise says nothing but the teleport's own notices
+    and the closing /exit follow it."""
+    idx = None
+    for i, ln in enumerate(lines):
+        o = _jline(ln)
+        if o and o.get('type') == 'user' and _text(o).startswith(TELEPORT_MARKER):
+            idx = i
+    if idx is None:
+        return None, 0, False
+    history = sum(1 for ln in lines[:idx] if (_jline(ln) or {}).get('type') in ('user', 'assistant'))
+    for ln in lines[idx + 1:]:
+        o = _jline(ln)
+        if o is None or o.get('type') in _TAIL_TYPES:
+            continue
+        if o.get('type') == 'user' and _text(o).lstrip().startswith(_LOCAL_COMMAND):
+            continue
+        return idx, history, False
+    return idx, history, True
+
+
+def find_teleported_transcript(folders, before):
+    """The transcript the teleport just wrote: new in one of the project folders
+    and carrying the marker. Newest first, in case of retries."""
+    new = [f for d in folders for f in glob.glob(os.path.join(d, '*.jsonl')) if f not in before]
+    for f in sorted(new, key=os.path.getmtime, reverse=True):
+        with open(f, encoding='utf-8', errors='replace') as fh:
+            if any(TELEPORT_MARKER in ln for ln in fh):
+                return f
+    return None
+
+
+def cloud_cli(claude_bin=None, app_store=None):
+    """(claude, env, status) ready to teleport, or exit saying what is missing."""
+    claude = claude_bin or find_claude_cli(app_store)
+    if not claude:
+        sys.exit("[error] Claude Code CLI not found (not on PATH, and no copy shipped with the desktop app);\n"
+                 "        install it, or pass --claude-bin")
+    env, cleaned = teleport_env()
+    if cleaned:
+        print("[info] running inside a Claude Code session: its environment markers are kept away from the teleport")
+    rc, out = _run([claude, 'auth', 'status'], env=env)
+    status = _jline(out) or {}
+    if not status.get('loggedIn') or status.get('authMethod') != 'claude.ai':
+        sys.exit("[error] the CLI has to be signed in with the claude.ai account that owns the session:\n"
+                 f"        run `\"{claude}\" auth login` in a terminal (an API key is not enough for --teleport)")
+    return claude, env, status
+
+
+def _swap_path(line, old_paths, new):
+    """Replace a folder path inside a transcript line (paths sit JSON-escaped there)."""
+    for old in old_paths:
+        if old and old != new:
+            line = line.replace(jesc(old), jesc(new))
+    return line
+
+
+def _teleport_in_checkout(cloud_id, repo, claude, env):
+    """--interactive: the teleport in the user's terminal, inside a clean checkout
+    of the session's repository, which is put back on its branch afterwards."""
+    if _run(['git', 'rev-parse', '--show-toplevel'], cwd=repo)[0] != 0:
+        sys.exit(f"[error] {repo} is not a git checkout; --interactive needs a checkout of the session's repository")
+    if _run(['git', 'status', '--porcelain'], cwd=repo)[1]:
+        sys.exit(f"[error] {repo} has uncommitted changes; commit or stash them first (the teleport switches branches)")
+    _, branch = _run(['git', 'branch', '--show-current'], cwd=repo)
+    _, head = _run(['git', 'rev-parse', 'HEAD'], cwd=repo)
+    print(f"[..] opening {cloud_id} with `claude --teleport`.")
+    print("     When it says 'Session resumed', type /exit to come back here.")
+    subprocess.call([claude, '--teleport', cloud_id], cwd=repo, env=env)
+    _, now = _run(['git', 'branch', '--show-current'], cwd=repo)
+    _, now_head = _run(['git', 'rev-parse', 'HEAD'], cwd=repo)
+    if now != branch or (not branch and now_head != head):
+        target = branch or head
+        if not _run(['git', 'status', '--porcelain'], cwd=repo)[1] and \
+                _run(['git', 'checkout', '-q', target], cwd=repo)[0] == 0:
+            print(f"[ok] checkout back on {branch or head[:12]} (the teleport had moved it to {now or now_head[:12]})")
+        else:
+            print(f"[warn] the checkout stayed on {now or now_head[:12]}; switch back with: git checkout {target}")
+
+
+def export_cloud(cloud_id, cwd, out, cli, title=None, claude_home=None, app_store=None,
+                 interactive=False, keep_tail=False):
+    """Pull a cloud session down and bundle it as a session of `cwd`.
+
+    Unattended (the default) the teleport runs in print mode inside an empty
+    scratch folder, so nothing of the user's is touched; the scratch folder's path
+    is then swapped for cwd, and what the CLI kept about it is removed. With
+    `interactive` it runs in cwd itself, and the local copy stays there to be
+    resumed. Returns (local session id, messages that came down)."""
+    claude, env, status = cli
+    projects = status.get('projectsDirectory') or os.path.join(default_claude_home(claude_home), 'projects')
+    run_dir = cwd if interactive else tempfile.mkdtemp(prefix='cse-teleport-')
+    runs = sorted({run_dir, os.path.realpath(run_dir)})
+    folders = sorted({os.path.join(projects, enc_project(p)) for p in runs})
+    existed = {d for d in folders if os.path.isdir(d)}
+    before = {f for d in folders for f in glob.glob(os.path.join(d, '*.jsonl'))}
+    work = tempfile.mkdtemp(prefix='cse-cloud-')
+    try:
+        if interactive:
+            _teleport_in_checkout(cloud_id, cwd, claude, env)
+        else:
+            print(f"[..] pulling {cloud_id} down with `claude --teleport` ...")
+            # print mode needs no terminal: the transcript is written, and the prompt
+            # goes to /exit, which print mode does not run -- so no model turn
+            rc, said = _run([claude, '-p', '/exit', '--teleport', cloud_id], cwd=run_dir, env=env,
+                            merge_stderr=True, timeout=600)
+            said = '\n'.join(ln for ln in said.splitlines() if "/exit isn't available" not in ln).strip()
+            if rc != 0:
+                sys.exit(f"[error] the teleport of {cloud_id} failed"
+                         + (f":\n{said}" if said else f" (exit code {rc})")
+                         + "\n        Is the CLI signed in to the account that owns the session?")
+            if said:
+                print("     " + said.replace('\n', '\n     '))
+
+        src = find_teleported_transcript(folders, before)
+        if not src:
+            sys.exit(f"[error] the teleport of {cloud_id} wrote no transcript"
+                     + (" -- let it finish loading ('Session resumed') before /exit." if interactive else "."))
+        with open(src, encoding='utf-8') as fh:
+            lines = fh.readlines()
+        idx, history, tail_is_noise = teleport_split(lines)
+        if not history:
+            sys.exit(f"[error] the teleported copy of {cloud_id} holds no conversation.\n"
+                     "        This can happen when the session did not run in Anthropic's cloud -- for example on a\n"
+                     "        computer serving Remote Control. Export it on the computer it ran on instead.")
+        if tail_is_noise and not keep_tail:
+            # the bundle holds the cloud conversation, not the teleport's notices
+            # and the /exit that closed it
+            lines = lines[:idx]
+        if not interactive:
+            lines = [_swap_path(ln, runs, cwd) for ln in lines]
+        sess_id = os.path.splitext(os.path.basename(src))[0]
+        export_src = os.path.join(work, sess_id + '.jsonl')
+        with open(export_src, 'w', encoding='utf-8', newline='\n') as fh:
+            fh.writelines(lines)
+        sidecar = os.path.join(os.path.dirname(src), sess_id)
+        if os.path.isdir(sidecar):
+            shutil.copytree(sidecar, os.path.join(work, sess_id))
+        print(f"[ok] teleported: {history} message(s) from the cloud, as a session of {cwd}")
+        if interactive:
+            print(f"     (the local copy stays; continue it here with: claude --resume {sess_id})")
+        do_export(argparse.Namespace(src=export_src, out=out, app_store=app_store, dry_run=False,
+                                     title=title, cloud_session_id=cloud_id))
+        return sess_id, history
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        if not interactive:
+            shutil.rmtree(run_dir, ignore_errors=True)
+            for d in folders:
+                if d not in existed:
+                    shutil.rmtree(d, ignore_errors=True)
+
+
+def do_export_cloud(args):
+    cloud_id = parse_cloud_id(args.session)
+    if not cloud_id:
+        sys.exit("[error] pass the cloud session id (session_...) or its claude.ai/code URL")
+    cwd = os.path.abspath(os.path.expanduser(args.cwd or os.getcwd()))
+    cli = cloud_cli(args.claude_bin, args.app_store)
+    if args.dry_run:
+        print(f"[dry] would run `{cli[0]} --teleport {cloud_id}` in "
+              + (cwd if args.interactive else "an empty scratch folder")
+              + f", and bundle it as a session of {cwd}")
+        return
+    out = os.path.abspath(args.out or f"claude-session-{cloud_id}.zip")
+    export_cloud(cloud_id, cwd, out, cli, title=args.title, claude_home=args.claude_home,
+                 app_store=args.app_store, interactive=args.interactive, keep_tail=args.keep_teleport_tail)
 
 # ---------------------------------------------------------------------- import
 def load_source(src, workdir):
@@ -601,6 +873,26 @@ def main():
     pe.add_argument('--app-store', default=None, help='source claude-code-sessions folder (default: auto)')
     pe.add_argument('--dry-run', action='store_true')
     pe.set_defaults(func=do_export)
+
+    pc = sub.add_parser('export-cloud',
+                        help='pull a cloud session down with `claude --teleport`, then export it like a local one')
+    pc.add_argument('session', help='cloud session id (session_...) or its claude.ai/code URL')
+    pc.add_argument('--cwd', default=None,
+                    help='project folder the session belongs to (default: current folder); nothing in it '
+                         'is touched, except with --interactive, where it must be a clean checkout of '
+                         "the session's repository")
+    pc.add_argument('--out', help='output zip path (default: ./claude-session-<cloud id>.zip)')
+    pc.add_argument('--title', default=None,
+                    help='sidebar title after import (the cloud name is not in the transcript)')
+    pc.add_argument('--claude-bin', default=None, help='Claude Code CLI to run (default: `claude` on PATH)')
+    pc.add_argument('--claude-home', help='.claude root, if the CLI does not report it (default ~/.claude)')
+    pc.add_argument('--app-store', default=None, help='claude-code-sessions folder (default: auto)')
+    pc.add_argument('--keep-teleport-tail', action='store_true',
+                    help="keep the teleport's notices and the closing /exit in the bundle")
+    pc.add_argument('--interactive', action='store_true',
+                    help='open the teleport in the terminal and /exit it yourself (default: runs unattended)')
+    pc.add_argument('--dry-run', action='store_true', help='check everything, run nothing')
+    pc.set_defaults(func=do_export_cloud)
 
     pi = sub.add_parser('import', help='retarget the cwd and install (jsonl + app record)')
     pi.add_argument('--src', required=True, help='.zip (from export) or a raw .jsonl')

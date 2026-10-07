@@ -135,6 +135,39 @@ auto-detects the target app store + the logged-in account folder, and writes
 
 Use `--dry-run` on either command to preview without writing.
 
+#### Cloud sessions (`export-cloud`)
+
+A session that ran in the cloud (claude.ai/code, or **Cloud** picked in the
+desktop app) has no local transcript, so there is nothing for `export` to read.
+`export-cloud` pulls it down first with Claude Code's own `claude --teleport`,
+then bundles it like any other session. In the GUI it is the **Export a cloud
+session** tab: paste the session's link, pick the project folder it should
+belong to, save.
+
+```bash
+python claude_session_port.py export-cloud <session_...|claude.ai/code URL> --cwd <its project folder> --title "Its name"
+```
+
+- The Claude Code CLI has to be **signed in with the claude.ai account that
+  owns the session**: run `claude auth login` once (an API key is not enough).
+  If `claude` is not on your PATH, the copy the desktop app ships is used.
+- It runs unattended: the teleport in print mode, inside an empty scratch
+  folder, with no model turn. Your checkouts are not touched, uncommitted
+  changes or not; `--cwd` (default: the current folder) only names the project
+  the session will belong to, typically your clone of its repository.
+- The bundle holds the cloud conversation only; the teleport's notices and the
+  `/exit` are left out (`--keep-teleport-tail` keeps them).
+- The cloud title is not in the transcript: pass `--title` to keep it in the
+  sidebar after import.
+- `--interactive` opens the teleport in your terminal instead, inside `--cwd`,
+  which must then be a clean checkout of the session's repository; type `/exit`
+  when it says *Session resumed*. The local copy stays there to be resumed.
+- Only sessions that ran in Anthropic's cloud come down with their
+  conversation. One that ran on a computer serving Remote Control teleports
+  empty; export it on that computer with `export` instead.
+
+Then `import` the bundle as usual.
+
 ---
 
 ## Migrating a whole install (`batch.py`)
@@ -170,6 +203,25 @@ with every source path it found. You supply the destinations:
 Matching is **longest-prefix**, so worktrees and sub-projects resolve from their
 parent root — you only map the roots. Use `--dry-run` to see every
 `old → new` decision before anything is written.
+
+### Cloud sessions in a migration
+
+Cloud sessions live in your account, not on the disk, so on a new machine with
+the same account they are already there. To bring some along anyway -- moving
+to another account, or keeping them as local sessions -- list them; each one is
+pulled down as in `export-cloud` and travels like the rest (the GUI's
+**Migrate everything** tab has a box for them):
+
+```bash
+python batch.py export-all --out ./migration \
+    --cloud "https://claude.ai/code/session_01Ab..." \
+    --cloud "session_01Cd... | /home/me/work/other-repo" \
+    --cloud-folder /home/me/work/main-repo
+```
+
+Each session belongs to the folder after its `|`, or to `--cloud-folder`; those
+folders show up in the path map like any other. `--cloud-file` reads the same
+lines from a file.
 
 ### Windows → Linux
 
