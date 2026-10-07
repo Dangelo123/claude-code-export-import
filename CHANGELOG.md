@@ -5,6 +5,42 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-07
+
+### Added
+
+- **`export-cloud`: export a session that ran in the cloud.** Cloud sessions
+  (claude.ai/code, or "Cloud" in the desktop app) have no local transcript, so
+  `export` had nothing to read
+  ([#1](https://github.com/Dangelo123/claude-code-export-import/issues/1)).
+  The new command pulls one down with Claude Code's own `claude --teleport` and
+  bundles it like any other session. The teleport runs in print mode inside an
+  empty scratch folder -- print mode needs no terminal, checks no repository,
+  switches no branch and runs no model turn -- so nothing of yours is touched;
+  the session is then given the project folder you name (`--cwd`), and what
+  the CLI kept about the scratch folder is removed. The teleport's notices and
+  the `/exit` that closes it are left out of the bundle. `--interactive` opens
+  the teleport in your terminal instead.
+- **The GUI does it too**, in a new **Export a cloud session** tab.
+- **Cloud sessions in a migration.** `export-all --cloud <link> [--cloud ...]`
+  (or `--cloud-file`), with `--cloud-folder` or a per-line `| <folder>`, brings
+  listed cloud sessions along; the **Migrate everything** tab has a box for
+  them. They are listed rather than found, because the CLI offers no way to
+  enumerate an account's cloud sessions -- and on a new machine with the same
+  account they are already there. `import-all` gives them a sidebar record even
+  in faithful mode, where records otherwise come from the source's profile and
+  a cloud session has none.
+- When `claude` is not on the PATH, the copy of Claude Code the desktop app
+  ships is used, so a desktop-only user has nothing to install.
+
+### Fixed in passing
+
+- Run from inside a Claude Code session (an agent, the desktop app's terminal),
+  the teleport inherited that session's `CLAUDE_CODE_CHILD_SESSION` marker and
+  saved no transcript at all; those markers are kept away from it. A session
+  that ran on a computer serving Remote Control teleports with no conversation
+  in it; that fails with an explanation instead of exporting an empty session.
+
 ## [1.6.0] - 2026-09-21
 
 The GUI was unusable on Linux without anyone noticing: it was written and
