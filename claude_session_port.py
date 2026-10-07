@@ -524,10 +524,13 @@ def cloud_cli(claude_bin=None, app_store=None):
 
 
 def _swap_path(line, old_paths, new):
-    """Replace a folder path inside a transcript line (paths sit JSON-escaped there)."""
-    for old in old_paths:
-        if old and old != new:
-            line = line.replace(jesc(old), jesc(new))
+    """Replace a folder path inside a transcript line (paths sit JSON-escaped there).
+
+    Longest first: a scratch folder and its resolved path can contain one another
+    (/var/x inside /private/var/x), and replacing the shorter one first would
+    leave the longer one half rewritten."""
+    for old in sorted({p for p in old_paths if p and p != new}, key=len, reverse=True):
+        line = line.replace(jesc(old), jesc(new))
     return line
 
 

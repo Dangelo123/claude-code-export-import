@@ -134,6 +134,13 @@ class Split(unittest.TestCase):
     def test_not_a_teleport(self):
         self.assertEqual(csp.teleport_split(lines(*HISTORY)), (None, 0, False))
 
+    def test_path_swap_longest_first(self):
+        # the shorter path sorts first alphabetically and sits inside the longer one
+        short, long_ = '/home/u/tmp/cse-teleport-x', '/z/home/u/tmp/cse-teleport-x'
+        ln = json.dumps({'cwd': long_, 'other': short}) + '\n'
+        o = json.loads(csp._swap_path(ln, [short, long_], '/work/p'))
+        self.assertEqual((o['cwd'], o['other']), ('/work/p', '/work/p'))
+
     def test_path_swap_is_json_aware(self):
         old, new = r'C:\Temp\cse-teleport-x', r'D:\Work\Project'
         ln = json.dumps({'cwd': old, 'message': {'content': old + r'\README.md'}}) + '\n'
